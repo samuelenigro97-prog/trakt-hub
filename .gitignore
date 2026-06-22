@@ -1,0 +1,4 @@
+node_modules/
+trakt_token.json
+nohup.out
+*.log
