@@ -20,8 +20,8 @@ const manifest = {
   resources: ['catalog'],
   types: ['movie', 'series'],
   catalogs: [
-    { type: 'movie', id: 'trakt-movies', name: 'Trakt - Film da vedere' },
-    { type: 'series', id: 'trakt-series', name: 'Trakt - Serie da vedere' }
+    { type: 'movie', id: 'trakt-movies', name: 'Da vedere' },
+    { type: 'series', id: 'trakt-series', name: 'Da vedere' }
   ],
   idPrefixes: ['tt'],
   logo: ADDON_URL + '/logo.png',
