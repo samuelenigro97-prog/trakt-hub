@@ -14,14 +14,14 @@ const CACHE_TTL = 30 * 60 * 1000; // 30 minuti
 
 const manifest = {
   id: 'it.samuele.trakt.watchlist',
-  version: '1.0.0',
+  version: '1.0.1',
   name: 'Trakt Watchlist',
   description: 'Film e serie dalla tua watchlist Trakt',
   resources: ['catalog'],
   types: ['movie', 'series'],
   catalogs: [
-    { type: 'movie', id: 'trakt-movies', name: 'Da vedere' },
-    { type: 'series', id: 'trakt-series', name: 'Da vedere' }
+    { type: 'movie', id: 'trakt-movies', name: 'Da vedere - Film' },
+    { type: 'series', id: 'trakt-series', name: 'Da vedere - Serie TV' }
   ],
   idPrefixes: ['tt'],
   logo: ADDON_URL + '/logo.png',
