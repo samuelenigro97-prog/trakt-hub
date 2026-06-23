@@ -14,7 +14,7 @@ const CACHE_TTL = 30 * 60 * 1000; // 30 minuti
 
 const manifest = {
   id: 'it.samuele.trakt.watchlist',
-  version: '1.0.2',
+  version: '1.0.3',
   name: 'Trakt Watchlist',
   description: 'Film e serie dalla tua watchlist Trakt',
   resources: ['catalog'],
@@ -203,8 +203,8 @@ async function main() {
   });
 
   const app = express();
-  app.use(getRouter(builder.getInterface()));
   app.get('/logo.png', (req, res) => res.sendFile(path.join(__dirname, 'logo.png')));
+  app.use(getRouter(builder.getInterface()));
 
   app.listen(PORT, () => {
     console.log('Trakt addon pronto su ' + ADDON_URL);
