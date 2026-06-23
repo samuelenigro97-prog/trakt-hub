@@ -33,6 +33,10 @@ let accessToken = null;
 // cache[type] = { metas: [...], ts: Date.now() }
 const cache = {};
 
+function clearCache() {
+  Object.keys(cache).forEach(k => delete cache[k]);
+}
+
 function loadToken() {
   if (process.env.TRAKT_ACCESS_TOKEN) {
     accessToken = process.env.TRAKT_ACCESS_TOKEN;
@@ -111,6 +115,10 @@ async function getTraktWatchlist(type) {
     'https://api.trakt.tv/users/' + TRAKT_USER + '/watchlist/' + type + '?limit=500',
     { headers }
   );
+  if (res.status === 401) {
+    clearCache();
+    throw new Error('Trakt 401: token non valido. Cache svuotata.');
+  }
   if (!res.ok) throw new Error('Trakt error: ' + res.status);
   return res.json();
 }
@@ -174,6 +182,7 @@ async function getCatalogCached(type) {
 }
 
 async function main() {
+  clearCache();
   if (!loadToken()) {
     if (process.env.RENDER) {
       throw new Error('Token mancante: imposta TRAKT_ACCESS_TOKEN nelle env vars di Render.');
