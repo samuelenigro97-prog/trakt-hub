@@ -16,7 +16,7 @@ const META_CACHE_TTL = 24 * 60 * 60 * 1000; // 24 ore
 
 const manifest = {
   id: 'it.samuele.trakt.watchlist',
-  version: '1.0.19',
+  version: '1.0.20',
   name: 'Trakt Watchlist',
   description: 'Film e serie dalla tua watchlist Trakt',
   resources: ['catalog', 'meta'],
@@ -231,6 +231,15 @@ const BACKDROP_SIZE = 'original';
 function posterUrl(path)   { return path ? 'https://image.tmdb.org/t/p/' + POSTER_SIZE   + path : null; }
 function backdropUrl(path) { return path ? 'https://image.tmdb.org/t/p/' + BACKDROP_SIZE + path : null; }
 
+// Restituisce il titolo localizzato: se TMDB non ha tradotto (IT = originale), usa EN
+function localizedTitle(it, en) {
+  const itTitle = it?.title || it?.name || '';
+  const enTitle = en?.title || en?.name || '';
+  const original = (it || en)?.original_title || (it || en)?.original_name || '';
+  if (itTitle && itTitle !== original) return itTitle;
+  return enTitle || itTitle;
+}
+
 // Sceglie il poster migliore: italiano > inglese > neutro (senza testo)
 function bestPosterPath(images, fallback) {
   const posters = images?.posters || [];
@@ -286,7 +295,7 @@ async function enrichWithTMDB(imdbId, traktType, tmdbId) {
     const en = enRes.ok ? await enRes.json() : null;
     if (!it && !en) return null;
     return {
-      title:         it?.title || it?.name || en?.title || en?.name,
+      title:         localizedTitle(it, en),
       overview:      it?.overview?.trim() || en?.overview?.trim() || '',
       poster_path:   bestPosterPath(it?.images, it?.poster_path || en?.poster_path),
       backdrop_path: bestBackdropPath(it?.images, it?.backdrop_path || en?.backdrop_path),
@@ -341,7 +350,8 @@ async function buildMeta(type, stremioId) {
     description: overview,
     genres:      (it?.genres || en?.genres || []).map(g => g.name),
     imdbRating:  base.vote_average ? String(base.vote_average.toFixed(1)) : undefined,
-    year, cast, director, runtime
+    year, cast, director, runtime,
+    name:        localizedTitle(it, en)
   };
 }
 
