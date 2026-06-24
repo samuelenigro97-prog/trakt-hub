@@ -14,7 +14,7 @@ const CACHE_TTL = 60 * 1000; // 1 minuto
 
 const manifest = {
   id: 'it.samuele.trakt.watchlist',
-  version: '1.0.6',
+  version: '1.0.7',
   name: 'Trakt Watchlist',
   description: 'Film e serie dalla tua watchlist Trakt',
   resources: ['catalog'],
@@ -29,6 +29,7 @@ const manifest = {
 };
 
 let accessToken = null;
+let refreshToken = null;
 
 // cache[type] = { metas: [...], ts: Date.now() }
 const cache = {};
@@ -40,6 +41,7 @@ function clearCache() {
 function loadToken() {
   if (process.env.TRAKT_ACCESS_TOKEN) {
     accessToken = process.env.TRAKT_ACCESS_TOKEN;
+    refreshToken = process.env.TRAKT_REFRESH_TOKEN || null;
     console.log('Token Trakt caricato da variabile d\'ambiente');
     return true;
   }
@@ -47,6 +49,7 @@ function loadToken() {
     if (fs.existsSync(TOKEN_FILE)) {
       const data = JSON.parse(fs.readFileSync(TOKEN_FILE, 'utf8'));
       accessToken = data.access_token;
+      refreshToken = data.refresh_token || null;
       console.log('Token Trakt caricato da', TOKEN_FILE);
       return true;
     }
@@ -57,8 +60,41 @@ function loadToken() {
 }
 
 function saveToken(tokenData) {
-  fs.writeFileSync(TOKEN_FILE, JSON.stringify(tokenData, null, 2));
+  if (!process.env.TRAKT_ACCESS_TOKEN) {
+    fs.writeFileSync(TOKEN_FILE, JSON.stringify(tokenData, null, 2));
+  }
   accessToken = tokenData.access_token;
+  refreshToken = tokenData.refresh_token || refreshToken;
+}
+
+// Rinnova automaticamente il token Trakt prima che scada
+async function refreshTraktToken() {
+  if (!refreshToken) {
+    console.warn('Nessun refresh token disponibile, impossibile rinnovare.');
+    return false;
+  }
+  try {
+    const res = await fetch('https://api.trakt.tv/oauth/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        refresh_token: refreshToken,
+        client_id: TRAKT_CLIENT_ID,
+        client_secret: TRAKT_CLIENT_SECRET,
+        grant_type: 'refresh_token'
+      })
+    });
+    if (!res.ok) {
+      console.error('Refresh token fallito:', res.status);
+      return false;
+    }
+    saveToken(await res.json());
+    console.log('Token Trakt rinnovato con successo.');
+    return true;
+  } catch (e) {
+    console.error('Errore refresh token:', e.message);
+    return false;
+  }
 }
 
 async function authenticateDeviceFlow() {
@@ -115,9 +151,22 @@ async function getTraktWatchlist(type) {
     'https://api.trakt.tv/users/' + TRAKT_USER + '/watchlist/' + type + '?limit=500',
     { headers }
   );
+
   if (res.status === 401) {
     clearCache();
-    throw new Error('Trakt 401: token non valido. Cache svuotata.');
+    console.warn('Trakt 401: provo a rinnovare il token...');
+    const renewed = await refreshTraktToken();
+    if (renewed) {
+      // Riprova con il nuovo token
+      headers['Authorization'] = 'Bearer ' + accessToken;
+      const retry = await fetch(
+        'https://api.trakt.tv/users/' + TRAKT_USER + '/watchlist/' + type + '?limit=500',
+        { headers }
+      );
+      if (!retry.ok) throw new Error('Trakt error dopo refresh: ' + retry.status);
+      return retry.json();
+    }
+    throw new Error('Trakt 401: token non valido e refresh fallito.');
   }
   if (!res.ok) throw new Error('Trakt error: ' + res.status);
   return res.json();
@@ -126,6 +175,8 @@ async function getTraktWatchlist(type) {
 async function enrichWithTMDB(imdbId, traktType, tmdbIdFallback) {
   try {
     const tmdbType = traktType === 'movies' ? 'movie' : 'tv';
+
+    // Prova prima con IMDB ID in italiano
     if (imdbId) {
       const res = await fetch(
         'https://api.themoviedb.org/3/find/' + imdbId +
@@ -133,15 +184,47 @@ async function enrichWithTMDB(imdbId, traktType, tmdbIdFallback) {
       );
       const data = await res.json();
       const results = tmdbType === 'movie' ? data.movie_results : data.tv_results;
-      if (results && results[0]) return results[0];
+      if (results && results[0]) {
+        const item = results[0];
+        // Se il poster manca in italiano, riprova in inglese
+        if (!item.poster_path) {
+          const enRes = await fetch(
+            'https://api.themoviedb.org/3/find/' + imdbId +
+            '?external_source=imdb_id&language=en-US&api_key=' + TMDB_KEY
+          );
+          const enData = await enRes.json();
+          const enResults = tmdbType === 'movie' ? enData.movie_results : enData.tv_results;
+          if (enResults && enResults[0] && enResults[0].poster_path) {
+            item.poster_path = enResults[0].poster_path;
+          }
+        }
+        return item;
+      }
     }
+
+    // Fallback diretto su TMDB ID
     if (tmdbIdFallback) {
       const res = await fetch(
         'https://api.themoviedb.org/3/' + tmdbType + '/' + tmdbIdFallback +
         '?language=it-IT&api_key=' + TMDB_KEY
       );
-      if (res.ok) return await res.json();
+      if (res.ok) {
+        const item = await res.json();
+        // Fallback poster in inglese se manca
+        if (!item.poster_path) {
+          const enRes = await fetch(
+            'https://api.themoviedb.org/3/' + tmdbType + '/' + tmdbIdFallback +
+            '?language=en-US&api_key=' + TMDB_KEY
+          );
+          if (enRes.ok) {
+            const enItem = await enRes.json();
+            if (enItem.poster_path) item.poster_path = enItem.poster_path;
+          }
+        }
+        return item;
+      }
     }
+
     return null;
   } catch (e) { return null; }
 }
@@ -149,6 +232,9 @@ async function enrichWithTMDB(imdbId, traktType, tmdbIdFallback) {
 async function buildCatalog(type) {
   const traktType = type === 'movie' ? 'movies' : 'shows';
   const items = await getTraktWatchlist(traktType);
+
+  // Ordina per data di aggiunta (più recente prima)
+  items.sort((a, b) => new Date(b.listed_at) - new Date(a.listed_at));
 
   const valid = items.slice(0, 300).filter(item => {
     const obj = item.movie || item.show;
@@ -181,15 +267,29 @@ async function buildCatalog(type) {
 async function getCatalogCached(type) {
   const entry = cache[type];
   if (entry && (Date.now() - entry.ts) < CACHE_TTL) {
-    console.log('[cache hit] ' + type + ' (' + Math.round((CACHE_TTL - (Date.now() - entry.ts)) / 60000) + ' min rimasti)');
     return entry.metas;
   }
 
   console.log('[cache miss] ' + type + ' — aggiorno dalla API...');
   const metas = await buildCatalog(type);
   cache[type] = { metas, ts: Date.now() };
-  console.log('[cache] ' + type + ': ' + metas.length + ' elementi salvati, prossimo refresh tra 30 min');
+  console.log('[cache] ' + type + ': ' + metas.length + ' elementi salvati');
   return metas;
+}
+
+// Ping a sé stesso ogni 14 minuti per evitare il sleep di Render
+function startKeepAlive() {
+  if (!process.env.RENDER) return;
+  const url = process.env.ADDON_URL || ('http://localhost:' + PORT);
+  setInterval(async () => {
+    try {
+      await fetch(url + '/manifest.json');
+      console.log('[keep-alive] ping inviato');
+    } catch (e) {
+      console.warn('[keep-alive] ping fallito:', e.message);
+    }
+  }, 14 * 60 * 1000);
+  console.log('[keep-alive] attivo, ping ogni 14 minuti');
 }
 
 async function main() {
@@ -220,6 +320,7 @@ async function main() {
   app.listen(PORT, () => {
     console.log('Trakt addon pronto su ' + ADDON_URL);
     console.log('Manifest: ' + ADDON_URL + '/manifest.json');
+    startKeepAlive();
   });
 }
 
