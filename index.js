@@ -14,7 +14,7 @@ const CACHE_TTL = 60 * 1000; // 1 minuto
 
 const manifest = {
   id: 'it.samuele.trakt.watchlist',
-  version: '1.0.10',
+  version: '1.0.11',
   name: 'Trakt Watchlist',
   description: 'Film e serie dalla tua watchlist Trakt',
   resources: ['catalog'],
@@ -172,6 +172,24 @@ async function getTraktWatchlist(type) {
   return res.json();
 }
 
+// Cache traduzioni per non ripetere chiamate a MyMemory
+const translationCache = new Map();
+
+async function translateToItalian(text) {
+  if (!text || !text.trim()) return '';
+  if (translationCache.has(text)) return translationCache.get(text);
+  try {
+    const url = 'https://api.mymemory.translated.net/get?q=' +
+      encodeURIComponent(text.slice(0, 500)) + '&langpair=en|it';
+    const res = await fetch(url);
+    if (!res.ok) return text;
+    const data = await res.json();
+    const translated = data?.responseData?.translatedText || text;
+    translationCache.set(text, translated);
+    return translated;
+  } catch (e) { return text; }
+}
+
 async function getTraktWatched(type) {
   const headers = {
     'Content-Type': 'application/json',
@@ -218,9 +236,16 @@ async function enrichWithTMDB(imdbId, traktType, tmdbId) {
     const en = enRes.ok ? await enRes.json() : null;
     if (!it && !en) return null;
 
+    const itOverview = it?.overview?.trim() || '';
+    const enOverview = en?.overview?.trim() || '';
+    let overview = itOverview;
+    if (!overview && enOverview) {
+      overview = await translateToItalian(enOverview);
+    }
+
     return {
       title:        it?.title || it?.name || en?.title || en?.name,
-      overview:     (it?.overview?.trim()) || en?.overview || '',
+      overview,
       poster_path:  it?.poster_path  || en?.poster_path,
       backdrop_path: it?.backdrop_path || en?.backdrop_path,
       genres:       (it?.genres || en?.genres || []).map(g => g.name),
