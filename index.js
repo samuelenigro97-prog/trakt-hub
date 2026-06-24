@@ -14,7 +14,7 @@ const CACHE_TTL = 60 * 1000; // 1 minuto
 
 const manifest = {
   id: 'it.samuele.trakt.watchlist',
-  version: '1.0.8',
+  version: '1.0.9',
   name: 'Trakt Watchlist',
   description: 'Film e serie dalla tua watchlist Trakt',
   resources: ['catalog'],
@@ -172,6 +172,24 @@ async function getTraktWatchlist(type) {
   return res.json();
 }
 
+async function getTraktWatched(type) {
+  const headers = {
+    'Content-Type': 'application/json',
+    'trakt-api-version': '2',
+    'trakt-api-key': TRAKT_CLIENT_ID,
+    'User-Agent': 'Mozilla/5.0 (compatible; stremio-trakt-addon/1.0)'
+  };
+  if (accessToken) headers['Authorization'] = 'Bearer ' + accessToken;
+  try {
+    const res = await fetch(
+      'https://api.trakt.tv/users/' + TRAKT_USER + '/watched/' + type,
+      { headers }
+    );
+    if (!res.ok) return [];
+    return res.json();
+  } catch (e) { return []; }
+}
+
 async function enrichWithTMDB(imdbId, traktType, tmdbId) {
   try {
     const tmdbType = traktType === 'movies' ? 'movie' : 'tv';
@@ -213,14 +231,42 @@ async function enrichWithTMDB(imdbId, traktType, tmdbId) {
 
 async function buildCatalog(type) {
   const traktType = type === 'movie' ? 'movies' : 'shows';
-  const items = await getTraktWatchlist(traktType);
+
+  // Watchlist e visti in parallelo
+  const [items, watched] = await Promise.all([
+    getTraktWatchlist(traktType),
+    getTraktWatched(traktType)
+  ]);
+
+  // Set degli ID già visti (film: escludi sempre; serie: escludi solo se completate)
+  const watchedImdb = new Set();
+  const watchedTmdb = new Set();
+  for (const w of watched) {
+    const obj = w.movie || w.show;
+    if (!obj) continue;
+    if (type === 'movie') {
+      if (obj.ids.imdb) watchedImdb.add(obj.ids.imdb);
+      if (obj.ids.tmdb) watchedTmdb.add(obj.ids.tmdb);
+    } else {
+      // Serie: escludi solo se tutti gli episodi andati in onda sono stati visti
+      const aired = (w.show && w.show.aired_episodes) || 0;
+      const seen = (w.seasons || []).reduce((tot, s) => tot + s.episodes.length, 0);
+      if (aired > 0 && seen >= aired) {
+        if (obj.ids.imdb) watchedImdb.add(obj.ids.imdb);
+        if (obj.ids.tmdb) watchedTmdb.add(obj.ids.tmdb);
+      }
+    }
+  }
 
   // Ordina per data di aggiunta (più recente prima)
   items.sort((a, b) => new Date(b.listed_at) - new Date(a.listed_at));
 
   const valid = items.slice(0, 300).filter(item => {
     const obj = item.movie || item.show;
-    return obj && obj.ids && (obj.ids.imdb || obj.ids.tmdb);
+    if (!obj || !obj.ids || !(obj.ids.imdb || obj.ids.tmdb)) return false;
+    if (obj.ids.imdb && watchedImdb.has(obj.ids.imdb)) return false;
+    if (obj.ids.tmdb && watchedTmdb.has(obj.ids.tmdb)) return false;
+    return true;
   });
 
   // Arricchimento TMDB in batch da 10 richieste parallele
