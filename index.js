@@ -16,7 +16,7 @@ const META_CACHE_TTL = 24 * 60 * 60 * 1000; // 24 ore
 
 const manifest = {
   id: 'it.samuele.trakt.watchlist',
-  version: '1.0.20',
+  version: '1.0.21',
   name: 'Trakt Watchlist',
   description: 'Film e serie dalla tua watchlist Trakt',
   resources: ['catalog', 'meta'],
@@ -462,6 +462,15 @@ async function buildRecommendations(type) {
   if (!tmdbIds.length) return [];
 
   const watchlistIds = new Set((cachedCatalog?.metas || []).map(m => m.id));
+
+  // Scarica la history da Trakt per filtrare i già visti
+  const watchedResult = await traktGet('https://api.trakt.tv/users/' + TRAKT_USER + '/watched/' + traktType, 'watched-' + traktType + '-rec');
+  const watchedTmdb = new Set();
+  for (const w of (watchedResult.data || [])) {
+    const obj = w.movie || w.show;
+    if (obj?.ids?.tmdb) watchedTmdb.add(String(obj.ids.tmdb));
+  }
+
   const seen = new Set();
   const recs = [];
 
@@ -479,7 +488,7 @@ async function buildRecommendations(type) {
         const id = it.id || en.id;
         if (!id) continue;
         const stremioId = 'tmdb:' + id;
-        if (seen.has(stremioId) || watchlistIds.has(stremioId)) continue;
+        if (seen.has(stremioId) || watchlistIds.has(stremioId) || watchedTmdb.has(String(id))) continue;
         seen.add(stremioId);
         recs.push({
           id: stremioId, type,
