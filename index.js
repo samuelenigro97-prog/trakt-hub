@@ -16,7 +16,7 @@ const META_CACHE_TTL = 24 * 60 * 60 * 1000; // 24 ore
 
 const manifest = {
   id: 'it.samuele.trakt.watchlist',
-  version: '1.0.21',
+  version: '1.0.22',
   name: 'Trakt Watchlist',
   description: 'Film e serie dalla tua watchlist Trakt',
   resources: ['catalog', 'meta'],
@@ -361,6 +361,7 @@ function metaFromTmdb(tmdb, obj, type) {
   const stremioId = obj.ids.imdb || ('tmdb:' + obj.ids.tmdb);
   return {
     id: stremioId, type,
+    tmdbId:      String(obj.ids.tmdb || ''),
     name:        (tmdb && tmdb.title) || obj.title,
     poster:      posterUrl(tmdb?.poster_path),
     background:  backdropUrl(tmdb?.backdrop_path),
@@ -443,18 +444,22 @@ async function buildRecommendations(type) {
   const tmdbType = type === 'movie' ? 'movie' : 'tv';
   const catalogId = type === 'movie' ? 'trakt-movies' : 'trakt-series';
 
-  // Prendi TMDB IDs dalla watchlist cached (no chiamate extra)
+  // Prendi TMDB IDs da TUTTI i titoli in watchlist (non solo quelli tmdb:)
   const tmdbIds = [];
+  const seenTmdb = new Set();
   const cachedCatalog = cache[catalogId];
   if (cachedCatalog?.metas?.length) {
-    for (const m of cachedCatalog.metas.slice(0, 10)) {
-      if (m.id.startsWith('tmdb:')) tmdbIds.push(m.id.replace('tmdb:', ''));
+    for (const m of cachedCatalog.metas.slice(0, 20)) {
+      let tid = null;
+      if (m.tmdbId) tid = m.tmdbId;
+      else if (m.id.startsWith('tmdb:')) tid = m.id.replace('tmdb:', '');
+      if (tid && !seenTmdb.has(tid)) { seenTmdb.add(tid); tmdbIds.push(tid); }
     }
   }
   // Fallback: fetch watchlist se cache non disponibile
   if (!tmdbIds.length) {
-    const result = await traktGet('https://api.trakt.tv/users/' + TRAKT_USER + '/watchlist/' + traktType + '?limit=15', null);
-    for (const item of (result.data || []).slice(0, 10)) {
+    const result = await traktGet('https://api.trakt.tv/users/' + TRAKT_USER + '/watchlist/' + traktType + '?limit=20', null);
+    for (const item of (result.data || []).slice(0, 20)) {
       const obj = item.movie || item.show;
       if (obj?.ids?.tmdb) tmdbIds.push(String(obj.ids.tmdb));
     }
@@ -515,7 +520,7 @@ function prefetchMeta(metas, stremioType) {
     return !metaCache[key] || (Date.now() - metaCache[key].ts) >= META_CACHE_TTL;
   });
   (async () => {
-    const BATCH = 5;
+    const BATCH = 10;
     for (let i = 0; i < toFetch.length; i += BATCH) {
       await Promise.all(toFetch.slice(i, i + BATCH).map(async meta => {
         const key = stremioType + ':' + meta.id;
@@ -524,7 +529,7 @@ function prefetchMeta(metas, stremioType) {
           if (m) metaCache[key] = { meta: m, ts: Date.now() };
         } catch (e) {}
       }));
-      if (i + BATCH < toFetch.length) await new Promise(r => setTimeout(r, 500));
+      if (i + BATCH < toFetch.length) await new Promise(r => setTimeout(r, 200));
     }
     saveCacheToDisk();
     console.log('[meta-prefetch] ' + stremioType + ': ' + toFetch.length + ' titoli pre-caricati');
