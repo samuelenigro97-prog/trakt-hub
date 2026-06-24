@@ -16,7 +16,7 @@ const META_CACHE_TTL = 24 * 60 * 60 * 1000; // 24 ore
 
 const manifest = {
   id: 'it.samuele.trakt.watchlist',
-  version: '1.0.17',
+  version: '1.0.18',
   name: 'Trakt Watchlist',
   description: 'Film e serie dalla tua watchlist Trakt',
   resources: ['catalog', 'meta'],
@@ -221,15 +221,17 @@ async function getTraktWatched(type) {
   } catch (e) { return []; }
 }
 
-async function getTraktRecommendations(type) {
-  try {
-    const url = 'https://api.trakt.tv/recommendations/' + type + '?limit=30&ignore_collected=false';
-    const result = await traktGet(url, 'recommendations-' + type);
-    return result.notModified ? null : (result.data || []);
-  } catch (e) { return []; }
-}
+// Rimosse le raccomandazioni Trakt (richiedono premium) → sostituite con TMDB
 
 // ─── TMDB ─────────────────────────────────────────────────────────────────────
+
+// Sceglie il poster migliore: italiano > inglese > neutro (senza testo)
+function bestPosterPath(images, fallback) {
+  const posters = images?.posters || [];
+  if (!posters.length) return fallback;
+  const prio = p => p.iso_639_1 === 'it' ? 0 : p.iso_639_1 === 'en' ? 1 : p.iso_639_1 === null ? 2 : 3;
+  return [...posters].sort((a, b) => prio(a) - prio(b) || (b.vote_average || 0) - (a.vote_average || 0))[0]?.file_path || fallback;
+}
 
 async function translateToItalian(text) {
   if (!text || !text.trim()) return '';
@@ -263,7 +265,7 @@ async function enrichWithTMDB(imdbId, traktType, tmdbId) {
     }
     if (!id) return null;
     const [itRes, enRes] = await Promise.all([
-      fetch('https://api.themoviedb.org/3/' + tmdbType + '/' + id + '?language=it-IT&api_key=' + TMDB_KEY),
+      fetch('https://api.themoviedb.org/3/' + tmdbType + '/' + id + '?language=it-IT&append_to_response=images&include_image_language=it,en,null&api_key=' + TMDB_KEY),
       fetch('https://api.themoviedb.org/3/' + tmdbType + '/' + id + '?language=en-US&api_key=' + TMDB_KEY)
     ]);
     const it = itRes.ok ? await itRes.json() : null;
@@ -272,7 +274,7 @@ async function enrichWithTMDB(imdbId, traktType, tmdbId) {
     return {
       title:         it?.title || it?.name || en?.title || en?.name,
       overview:      it?.overview?.trim() || en?.overview?.trim() || '',
-      poster_path:   it?.poster_path  || en?.poster_path,
+      poster_path:   bestPosterPath(it?.images, it?.poster_path || en?.poster_path),
       backdrop_path: it?.backdrop_path || en?.backdrop_path,
       genres:        (it?.genres || en?.genres || []).map(g => g.name),
       vote_average:  (it || en)?.vote_average
@@ -294,7 +296,7 @@ async function buildMeta(type, stremioId) {
     tmdbId = results[0].id;
   }
   const [itRes, enRes] = await Promise.all([
-    fetch('https://api.themoviedb.org/3/' + tmdbType + '/' + tmdbId + '?language=it-IT&append_to_response=credits&api_key=' + TMDB_KEY),
+    fetch('https://api.themoviedb.org/3/' + tmdbType + '/' + tmdbId + '?language=it-IT&append_to_response=credits,images&include_image_language=it,en,null&api_key=' + TMDB_KEY),
     fetch('https://api.themoviedb.org/3/' + tmdbType + '/' + tmdbId + '?language=en-US&append_to_response=credits&api_key=' + TMDB_KEY)
   ]);
   const it = itRes.ok ? await itRes.json() : null;
@@ -320,7 +322,7 @@ async function buildMeta(type, stremioId) {
   return {
     id: stremioId, type,
     name:        it?.title || it?.name || en?.title || en?.name,
-    poster:      base.poster_path   ? 'https://image.tmdb.org/t/p/w780'  + base.poster_path   : null,
+    poster:      bestPosterPath(it?.images, base.poster_path) ? 'https://image.tmdb.org/t/p/w780'  + bestPosterPath(it?.images, base.poster_path)   : null,
     background:  base.backdrop_path ? 'https://image.tmdb.org/t/p/w1280' + base.backdrop_path : null,
     description: overview,
     genres:      (it?.genres || en?.genres || []).map(g => g.name),
@@ -414,12 +416,62 @@ async function buildCatalog(type) {
 
 async function buildRecommendations(type) {
   const traktType = type === 'movie' ? 'movies' : 'shows';
-  const items = await getTraktRecommendations(traktType);
-  if (items === null) return null; // ETag 304
-  if (!items.length) return [];
+  const tmdbType = type === 'movie' ? 'movie' : 'tv';
+  const catalogId = type === 'movie' ? 'trakt-movies' : 'trakt-series';
 
-  const validObjs = items.filter(obj => obj && obj.ids && (obj.ids.imdb || obj.ids.tmdb));
-  return enrichBatch(validObjs, traktType, type);
+  // Prendi TMDB IDs dalla watchlist cached (no chiamate extra)
+  const tmdbIds = [];
+  const cachedCatalog = cache[catalogId];
+  if (cachedCatalog?.metas?.length) {
+    for (const m of cachedCatalog.metas.slice(0, 10)) {
+      if (m.id.startsWith('tmdb:')) tmdbIds.push(m.id.replace('tmdb:', ''));
+    }
+  }
+  // Fallback: fetch watchlist se cache non disponibile
+  if (!tmdbIds.length) {
+    const result = await traktGet('https://api.trakt.tv/users/' + TRAKT_USER + '/watchlist/' + traktType + '?limit=15', null);
+    for (const item of (result.data || []).slice(0, 10)) {
+      const obj = item.movie || item.show;
+      if (obj?.ids?.tmdb) tmdbIds.push(String(obj.ids.tmdb));
+    }
+  }
+  if (!tmdbIds.length) return [];
+
+  const watchlistIds = new Set((cachedCatalog?.metas || []).map(m => m.id));
+  const seen = new Set();
+  const recs = [];
+
+  await Promise.all(tmdbIds.map(async tmdbId => {
+    try {
+      const [itRes, enRes] = await Promise.all([
+        fetch('https://api.themoviedb.org/3/' + tmdbType + '/' + tmdbId + '/recommendations?language=it-IT&api_key=' + TMDB_KEY),
+        fetch('https://api.themoviedb.org/3/' + tmdbType + '/' + tmdbId + '/recommendations?language=en-US&api_key=' + TMDB_KEY)
+      ]);
+      const itItems = itRes.ok ? (await itRes.json()).results || [] : [];
+      const enItems = enRes.ok ? (await enRes.json()).results || [] : [];
+      for (let i = 0; i < Math.max(itItems.length, enItems.length); i++) {
+        const it = itItems[i] || {};
+        const en = enItems[i] || {};
+        const id = it.id || en.id;
+        if (!id) continue;
+        const stremioId = 'tmdb:' + id;
+        if (seen.has(stremioId) || watchlistIds.has(stremioId)) continue;
+        seen.add(stremioId);
+        recs.push({
+          id: stremioId, type,
+          name:        it.title || it.name || en.title || en.name,
+          poster:      (it.poster_path || en.poster_path) ? 'https://image.tmdb.org/t/p/w780' + (it.poster_path || en.poster_path) : null,
+          background:  (it.backdrop_path || en.backdrop_path) ? 'https://image.tmdb.org/t/p/w1280' + (it.backdrop_path || en.backdrop_path) : null,
+          description: it.overview?.trim() || en.overview?.trim() || '',
+          genres:      [],
+          imdbRating:  (it.vote_average || en.vote_average) ? String((it.vote_average || en.vote_average).toFixed(1)) : undefined,
+          year:        parseInt(((it.release_date || it.first_air_date || en.release_date || en.first_air_date) || '').slice(0, 4)) || undefined
+        });
+      }
+    } catch (e) {}
+  }));
+
+  return recs.slice(0, 25);
 }
 
 // ─── Cache manager ────────────────────────────────────────────────────────────
