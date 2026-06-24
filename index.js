@@ -14,7 +14,7 @@ const CACHE_TTL = 30 * 60 * 1000; // 30 minuti
 
 const manifest = {
   id: 'it.samuele.trakt.watchlist',
-  version: '1.0.4',
+  version: '1.0.5',
   name: 'Trakt Watchlist',
   description: 'Film e serie dalla tua watchlist Trakt',
   resources: ['catalog'],
@@ -23,7 +23,7 @@ const manifest = {
     { type: 'movie', id: 'trakt-movies', name: 'Da vedere' },
     { type: 'series', id: 'trakt-series', name: 'Da vedere' }
   ],
-  idPrefixes: ['tt'],
+  idPrefixes: ['tt', 'tmdb:'],
   logo: ADDON_URL + '/logo.png',
   background: 'https://images.unsplash.com/photo-1489599849927-2ee91cede3ba?w=1280'
 };
@@ -123,16 +123,26 @@ async function getTraktWatchlist(type) {
   return res.json();
 }
 
-async function enrichWithTMDB(imdbId, traktType) {
+async function enrichWithTMDB(imdbId, traktType, tmdbIdFallback) {
   try {
     const tmdbType = traktType === 'movies' ? 'movie' : 'tv';
-    const res = await fetch(
-      'https://api.themoviedb.org/3/find/' + imdbId +
-      '?external_source=imdb_id&language=it-IT&api_key=' + TMDB_KEY
-    );
-    const data = await res.json();
-    const results = tmdbType === 'movie' ? data.movie_results : data.tv_results;
-    return results && results[0] ? results[0] : null;
+    if (imdbId) {
+      const res = await fetch(
+        'https://api.themoviedb.org/3/find/' + imdbId +
+        '?external_source=imdb_id&language=it-IT&api_key=' + TMDB_KEY
+      );
+      const data = await res.json();
+      const results = tmdbType === 'movie' ? data.movie_results : data.tv_results;
+      if (results && results[0]) return results[0];
+    }
+    if (tmdbIdFallback) {
+      const res = await fetch(
+        'https://api.themoviedb.org/3/' + tmdbType + '/' + tmdbIdFallback +
+        '?language=it-IT&api_key=' + TMDB_KEY
+      );
+      if (res.ok) return await res.json();
+    }
+    return null;
   } catch (e) { return null; }
 }
 
@@ -142,7 +152,7 @@ async function buildCatalog(type) {
 
   const valid = items.slice(0, 300).filter(item => {
     const obj = item.movie || item.show;
-    return obj && obj.ids && obj.ids.imdb;
+    return obj && obj.ids && (obj.ids.imdb || obj.ids.tmdb);
   });
 
   // Arricchimento TMDB in batch da 10 richieste parallele
@@ -152,9 +162,10 @@ async function buildCatalog(type) {
     const batch = valid.slice(i, i + BATCH);
     const results = await Promise.all(batch.map(async item => {
       const obj = item.movie || item.show;
-      const tmdb = await enrichWithTMDB(obj.ids.imdb, traktType);
+      const tmdb = await enrichWithTMDB(obj.ids.imdb, traktType, obj.ids.tmdb);
+      const stremioId = obj.ids.imdb || ('tmdb:' + obj.ids.tmdb);
       return {
-        id: obj.ids.imdb,
+        id: stremioId,
         type,
         name: (tmdb && (tmdb.title || tmdb.name)) || obj.title,
         poster: tmdb && tmdb.poster_path ? 'https://image.tmdb.org/t/p/w500' + tmdb.poster_path : null,
