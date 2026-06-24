@@ -14,7 +14,7 @@ const CACHE_TTL = 60 * 1000; // 1 minuto
 
 const manifest = {
   id: 'it.samuele.trakt.watchlist',
-  version: '1.0.13',
+  version: '1.0.14',
   name: 'Trakt Watchlist',
   description: 'Film e serie dalla tua watchlist Trakt',
   resources: ['catalog', 'meta'],
@@ -179,13 +179,13 @@ async function translateToItalian(text) {
   if (!text || !text.trim()) return '';
   if (translationCache.has(text)) return translationCache.get(text);
   try {
-    const url = 'https://api.mymemory.translated.net/get?q=' +
-      encodeURIComponent(text.slice(0, 500)) + '&langpair=en|it';
-    const res = await fetch(url);
+    const url = 'https://translate.googleapis.com/translate_a/single?client=gtx&sl=en&tl=it&dt=t&q=' +
+      encodeURIComponent(text.slice(0, 1000));
+    const res = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0' } });
     if (!res.ok) return text;
     const data = await res.json();
-    const translated = data?.responseData?.translatedText;
-    // Non mettere in cache se la traduzione è fallita o è uguale all'originale
+    // Risposta: [[[translated, original], ...], ...]
+    const translated = data[0].map(chunk => chunk[0]).join('');
     if (translated && translated !== text) {
       translationCache.set(text, translated);
       return translated;
