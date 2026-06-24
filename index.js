@@ -14,7 +14,7 @@ const CACHE_TTL = 60 * 1000; // 1 minuto
 
 const manifest = {
   id: 'it.samuele.trakt.watchlist',
-  version: '1.0.9',
+  version: '1.0.10',
   name: 'Trakt Watchlist',
   description: 'Film e serie dalla tua watchlist Trakt',
   resources: ['catalog'],
@@ -238,6 +238,17 @@ async function buildCatalog(type) {
     getTraktWatched(traktType)
   ]);
 
+  // Mappa imdb/tmdb → aired_episodes dalla watchlist (campo affidabile)
+  const airedByImdb = new Map();
+  const airedByTmdb = new Map();
+  for (const item of items) {
+    const obj = item.show || item.movie;
+    if (!obj) continue;
+    const aired = obj.aired_episodes || 0;
+    if (obj.ids.imdb) airedByImdb.set(obj.ids.imdb, aired);
+    if (obj.ids.tmdb) airedByTmdb.set(obj.ids.tmdb, aired);
+  }
+
   // Set degli ID già visti (film: escludi sempre; serie: escludi solo se completate)
   const watchedImdb = new Set();
   const watchedTmdb = new Set();
@@ -248,8 +259,8 @@ async function buildCatalog(type) {
       if (obj.ids.imdb) watchedImdb.add(obj.ids.imdb);
       if (obj.ids.tmdb) watchedTmdb.add(obj.ids.tmdb);
     } else {
-      // Serie: escludi solo se tutti gli episodi andati in onda sono stati visti
-      const aired = (w.show && w.show.aired_episodes) || 0;
+      // aired_episodes dalla watchlist, più affidabile dell'endpoint /watched
+      const aired = airedByImdb.get(obj.ids.imdb) || airedByTmdb.get(obj.ids.tmdb) || 0;
       const seen = (w.seasons || []).reduce((tot, s) => tot + s.episodes.length, 0);
       if (aired > 0 && seen >= aired) {
         if (obj.ids.imdb) watchedImdb.add(obj.ids.imdb);
