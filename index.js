@@ -14,10 +14,10 @@ const CACHE_TTL = 60 * 1000; // 1 minuto
 
 const manifest = {
   id: 'it.samuele.trakt.watchlist',
-  version: '1.0.11',
+  version: '1.0.12',
   name: 'Trakt Watchlist',
   description: 'Film e serie dalla tua watchlist Trakt',
-  resources: ['catalog'],
+  resources: ['catalog', 'meta'],
   types: ['movie', 'series'],
   catalogs: [
     { type: 'movie', id: 'trakt-movies', name: 'Da vedere' },
@@ -331,6 +331,83 @@ async function buildCatalog(type) {
   return metas;
 }
 
+async function buildMeta(type, stremioId) {
+  const tmdbType = type === 'movie' ? 'movie' : 'tv';
+
+  // Risolvi TMDB ID
+  let tmdbId;
+  if (stremioId.startsWith('tmdb:')) {
+    tmdbId = stremioId.replace('tmdb:', '');
+  } else {
+    const res = await fetch(
+      'https://api.themoviedb.org/3/find/' + stremioId +
+      '?external_source=imdb_id&api_key=' + TMDB_KEY
+    );
+    if (!res.ok) return null;
+    const data = await res.json();
+    const results = tmdbType === 'movie' ? data.movie_results : data.tv_results;
+    if (!results || !results[0]) return null;
+    tmdbId = results[0].id;
+  }
+
+  // Fetch italiano e inglese con credits in parallelo
+  const [itRes, enRes] = await Promise.all([
+    fetch('https://api.themoviedb.org/3/' + tmdbType + '/' + tmdbId +
+      '?language=it-IT&append_to_response=credits&api_key=' + TMDB_KEY),
+    fetch('https://api.themoviedb.org/3/' + tmdbType + '/' + tmdbId +
+      '?language=en-US&append_to_response=credits&api_key=' + TMDB_KEY)
+  ]);
+  const it = itRes.ok ? await itRes.json() : null;
+  const en = enRes.ok ? await enRes.json() : null;
+  if (!it && !en) return null;
+
+  const base = it || en;
+
+  // Overview in italiano con fallback tradotto
+  const itOverview = it?.overview?.trim() || '';
+  const enOverview = en?.overview?.trim() || '';
+  let overview = itOverview;
+  if (!overview && enOverview) overview = await translateToItalian(enOverview);
+
+  // Cast (primi 6)
+  const cast = (base.credits?.cast || []).slice(0, 6).map(a => a.name);
+
+  // Regista (film) o creatore (serie)
+  let director = [];
+  if (type === 'movie') {
+    director = (base.credits?.crew || []).filter(c => c.job === 'Director').map(c => c.name);
+  } else {
+    director = (base.created_by || []).map(c => c.name);
+  }
+
+  // Durata
+  let runtime;
+  if (type === 'movie' && base.runtime) {
+    runtime = base.runtime + ' min';
+  } else if (type === 'series' && base.episode_run_time && base.episode_run_time[0]) {
+    runtime = base.episode_run_time[0] + ' min';
+  }
+
+  // Anno
+  const dateStr = base.release_date || base.first_air_date || '';
+  const year = dateStr ? parseInt(dateStr) : undefined;
+
+  return {
+    id: stremioId,
+    type,
+    name:        it?.title || it?.name || en?.title || en?.name,
+    poster:      base.poster_path   ? 'https://image.tmdb.org/t/p/w780'  + base.poster_path   : null,
+    background:  base.backdrop_path ? 'https://image.tmdb.org/t/p/w1280' + base.backdrop_path : null,
+    description: overview,
+    genres:      (it?.genres || en?.genres || []).map(g => g.name),
+    imdbRating:  base.vote_average ? String(base.vote_average.toFixed(1)) : undefined,
+    year,
+    cast,
+    director,
+    runtime
+  };
+}
+
 async function getCatalogCached(type) {
   const entry = cache[type];
   if (entry && (Date.now() - entry.ts) < CACHE_TTL) {
@@ -377,6 +454,17 @@ async function main() {
     } catch (e) {
       console.error('Errore catalogo:', e.message);
       return { metas: [] };
+    }
+  });
+
+  builder.defineMetaHandler(async ({ type, id }) => {
+    try {
+      const meta = await buildMeta(type, id);
+      if (!meta) return { meta: null };
+      return { meta };
+    } catch (e) {
+      console.error('Errore meta:', e.message);
+      return { meta: null };
     }
   });
 
