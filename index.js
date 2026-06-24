@@ -14,7 +14,7 @@ const CACHE_TTL = 60 * 1000; // 1 minuto
 
 const manifest = {
   id: 'it.samuele.trakt.watchlist',
-  version: '1.0.14',
+  version: '1.0.15',
   name: 'Trakt Watchlist',
   description: 'Film e serie dalla tua watchlist Trakt',
   resources: ['catalog', 'meta'],
@@ -33,9 +33,13 @@ let refreshToken = null;
 
 // cache[type] = { metas: [...], ts: Date.now() }
 const cache = {};
+// metaCache[id] = { meta: {...}, ts: Date.now() }
+const metaCache = {};
+const META_CACHE_TTL = 24 * 60 * 60 * 1000; // 24 ore
 
 function clearCache() {
   Object.keys(cache).forEach(k => delete cache[k]);
+  Object.keys(metaCache).forEach(k => delete metaCache[k]);
 }
 
 function loadToken() {
@@ -415,6 +419,16 @@ async function getCatalogCached(type) {
   const metas = await buildCatalog(type);
   cache[type] = { metas, ts: Date.now() };
   console.log('[cache] ' + type + ': ' + metas.length + ' elementi salvati');
+  // Pre-popola metaCache in background per ogni titolo
+  const stremioType = type === 'movie' ? 'movie' : 'series';
+  for (const meta of metas) {
+    const cacheKey = stremioType + ':' + meta.id;
+    if (!metaCache[cacheKey] || (Date.now() - metaCache[cacheKey].ts) >= META_CACHE_TTL) {
+      buildMeta(stremioType, meta.id)
+        .then(m => { if (m) metaCache[cacheKey] = { meta: m, ts: Date.now() }; })
+        .catch(() => {});
+    }
+  }
   return metas;
 }
 
@@ -456,8 +470,14 @@ async function main() {
 
   builder.defineMetaHandler(async ({ type, id }) => {
     try {
+      const cacheKey = type + ':' + id;
+      const entry = metaCache[cacheKey];
+      if (entry && (Date.now() - entry.ts) < META_CACHE_TTL) {
+        return { meta: entry.meta };
+      }
       const meta = await buildMeta(type, id);
       if (!meta) return { meta: null };
+      metaCache[cacheKey] = { meta, ts: Date.now() };
       return { meta };
     } catch (e) {
       console.error('Errore meta:', e.message);
