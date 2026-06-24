@@ -16,7 +16,7 @@ const META_CACHE_TTL = 24 * 60 * 60 * 1000; // 24 ore
 
 const manifest = {
   id: 'it.samuele.trakt.watchlist',
-  version: '1.0.22',
+  version: '1.0.23',
   name: 'Trakt Watchlist',
   description: 'Film e serie dalla tua watchlist Trakt',
   resources: ['catalog', 'meta'],
@@ -231,12 +231,17 @@ const BACKDROP_SIZE = 'original';
 function posterUrl(path)   { return path ? 'https://image.tmdb.org/t/p/' + POSTER_SIZE   + path : null; }
 function backdropUrl(path) { return path ? 'https://image.tmdb.org/t/p/' + BACKDROP_SIZE + path : null; }
 
-// Restituisce il titolo localizzato: se TMDB non ha tradotto (IT = originale), usa EN
+// Restituisce il titolo localizzato: se TMDB non ha tradotto (IT = originale)
+// E il film non è originariamente italiano, usa EN come fallback
 function localizedTitle(it, en) {
   const itTitle = it?.title || it?.name || '';
   const enTitle = en?.title || en?.name || '';
   const original = (it || en)?.original_title || (it || en)?.original_name || '';
-  if (itTitle && itTitle !== original) return itTitle;
+  const originalLang = (it || en)?.original_language || '';
+  // Se il titolo IT è diverso dall'originale → è tradotto, usalo
+  // Se il film è originariamente italiano → tieni il titolo italiano
+  // Altrimenti (IT = originale di un film non italiano) → usa EN
+  if (itTitle && (itTitle !== original || originalLang === 'it')) return itTitle;
   return enTitle || itTitle;
 }
 
