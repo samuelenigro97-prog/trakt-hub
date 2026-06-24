@@ -10,11 +10,11 @@ const TMDB_KEY = 'edf2b5b43d56fa6eea398145d50a1e98';
 const TOKEN_FILE = path.join(__dirname, 'trakt_token.json');
 const PORT = parseInt(process.env.PORT || '7779');
 const ADDON_URL = (process.env.ADDON_URL || 'http://192.168.178.188:7779').replace(/\/$/, '');
-const CACHE_TTL = 30 * 60 * 1000; // 30 minuti
+const CACHE_TTL = 60 * 1000; // 1 minuto
 
 const manifest = {
   id: 'it.samuele.trakt.watchlist',
-  version: '1.0.5',
+  version: '1.0.6',
   name: 'Trakt Watchlist',
   description: 'Film e serie dalla tua watchlist Trakt',
   resources: ['catalog'],
