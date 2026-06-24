@@ -14,7 +14,7 @@ const CACHE_TTL = 60 * 1000; // 1 minuto
 
 const manifest = {
   id: 'it.samuele.trakt.watchlist',
-  version: '1.0.15',
+  version: '1.0.16',
   name: 'Trakt Watchlist',
   description: 'Film e serie dalla tua watchlist Trakt',
   resources: ['catalog', 'meta'],
@@ -419,16 +419,26 @@ async function getCatalogCached(type) {
   const metas = await buildCatalog(type);
   cache[type] = { metas, ts: Date.now() };
   console.log('[cache] ' + type + ': ' + metas.length + ' elementi salvati');
-  // Pre-popola metaCache in background per ogni titolo
+  // Pre-popola metaCache in background con coda a 5 parallele
   const stremioType = type === 'movie' ? 'movie' : 'series';
-  for (const meta of metas) {
+  const toFetch = metas.filter(meta => {
     const cacheKey = stremioType + ':' + meta.id;
-    if (!metaCache[cacheKey] || (Date.now() - metaCache[cacheKey].ts) >= META_CACHE_TTL) {
-      buildMeta(stremioType, meta.id)
-        .then(m => { if (m) metaCache[cacheKey] = { meta: m, ts: Date.now() }; })
-        .catch(() => {});
+    return !metaCache[cacheKey] || (Date.now() - metaCache[cacheKey].ts) >= META_CACHE_TTL;
+  });
+  (async () => {
+    const BATCH = 5;
+    for (let i = 0; i < toFetch.length; i += BATCH) {
+      await Promise.all(toFetch.slice(i, i + BATCH).map(async meta => {
+        const cacheKey = stremioType + ':' + meta.id;
+        try {
+          const m = await buildMeta(stremioType, meta.id);
+          if (m) metaCache[cacheKey] = { meta: m, ts: Date.now() };
+        } catch (e) {}
+      }));
+      if (i + BATCH < toFetch.length) await new Promise(r => setTimeout(r, 500));
     }
-  }
+    console.log('[meta-prefetch] ' + stremioType + ': ' + toFetch.length + ' titoli pre-caricati');
+  })();
   return metas;
 }
 
