@@ -16,7 +16,7 @@ const META_CACHE_TTL = 24 * 60 * 60 * 1000; // 24 ore
 
 const manifest = {
   id: 'it.samuele.trakt.watchlist',
-  version: '1.0.18',
+  version: '1.0.19',
   name: 'Trakt Watchlist',
   description: 'Film e serie dalla tua watchlist Trakt',
   resources: ['catalog', 'meta'],
@@ -225,12 +225,26 @@ async function getTraktWatched(type) {
 
 // ─── TMDB ─────────────────────────────────────────────────────────────────────
 
+const POSTER_SIZE   = 'original';
+const BACKDROP_SIZE = 'original';
+
+function posterUrl(path)   { return path ? 'https://image.tmdb.org/t/p/' + POSTER_SIZE   + path : null; }
+function backdropUrl(path) { return path ? 'https://image.tmdb.org/t/p/' + BACKDROP_SIZE + path : null; }
+
 // Sceglie il poster migliore: italiano > inglese > neutro (senza testo)
 function bestPosterPath(images, fallback) {
   const posters = images?.posters || [];
   if (!posters.length) return fallback;
   const prio = p => p.iso_639_1 === 'it' ? 0 : p.iso_639_1 === 'en' ? 1 : p.iso_639_1 === null ? 2 : 3;
   return [...posters].sort((a, b) => prio(a) - prio(b) || (b.vote_average || 0) - (a.vote_average || 0))[0]?.file_path || fallback;
+}
+
+// Sceglie il backdrop migliore: neutro > inglese > italiano (i backdrop neutri sono i migliori)
+function bestBackdropPath(images, fallback) {
+  const backdrops = images?.backdrops || [];
+  if (!backdrops.length) return fallback;
+  const prio = p => p.iso_639_1 === null ? 0 : p.iso_639_1 === 'en' ? 1 : p.iso_639_1 === 'it' ? 2 : 3;
+  return [...backdrops].sort((a, b) => prio(a) - prio(b) || (b.vote_average || 0) - (a.vote_average || 0))[0]?.file_path || fallback;
 }
 
 async function translateToItalian(text) {
@@ -275,7 +289,7 @@ async function enrichWithTMDB(imdbId, traktType, tmdbId) {
       title:         it?.title || it?.name || en?.title || en?.name,
       overview:      it?.overview?.trim() || en?.overview?.trim() || '',
       poster_path:   bestPosterPath(it?.images, it?.poster_path || en?.poster_path),
-      backdrop_path: it?.backdrop_path || en?.backdrop_path,
+      backdrop_path: bestBackdropPath(it?.images, it?.backdrop_path || en?.backdrop_path),
       genres:        (it?.genres || en?.genres || []).map(g => g.name),
       vote_average:  (it || en)?.vote_average
     };
@@ -322,8 +336,8 @@ async function buildMeta(type, stremioId) {
   return {
     id: stremioId, type,
     name:        it?.title || it?.name || en?.title || en?.name,
-    poster:      bestPosterPath(it?.images, base.poster_path) ? 'https://image.tmdb.org/t/p/w780'  + bestPosterPath(it?.images, base.poster_path)   : null,
-    background:  base.backdrop_path ? 'https://image.tmdb.org/t/p/w1280' + base.backdrop_path : null,
+    poster:      posterUrl(bestPosterPath(it?.images, base.poster_path)),
+    background:  backdropUrl(bestBackdropPath(it?.images, base.backdrop_path)),
     description: overview,
     genres:      (it?.genres || en?.genres || []).map(g => g.name),
     imdbRating:  base.vote_average ? String(base.vote_average.toFixed(1)) : undefined,
@@ -338,8 +352,8 @@ function metaFromTmdb(tmdb, obj, type) {
   return {
     id: stremioId, type,
     name:        (tmdb && tmdb.title) || obj.title,
-    poster:      tmdb?.poster_path   ? 'https://image.tmdb.org/t/p/w780'  + tmdb.poster_path   : null,
-    background:  tmdb?.backdrop_path ? 'https://image.tmdb.org/t/p/w1280' + tmdb.backdrop_path : null,
+    poster:      posterUrl(tmdb?.poster_path),
+    background:  backdropUrl(tmdb?.backdrop_path),
     description: tmdb?.overview || '',
     genres:      tmdb?.genres || [],
     imdbRating:  tmdb?.vote_average ? String(tmdb.vote_average.toFixed(1)) : undefined,
@@ -460,8 +474,8 @@ async function buildRecommendations(type) {
         recs.push({
           id: stremioId, type,
           name:        it.title || it.name || en.title || en.name,
-          poster:      (it.poster_path || en.poster_path) ? 'https://image.tmdb.org/t/p/w780' + (it.poster_path || en.poster_path) : null,
-          background:  (it.backdrop_path || en.backdrop_path) ? 'https://image.tmdb.org/t/p/w1280' + (it.backdrop_path || en.backdrop_path) : null,
+          poster:      posterUrl(it.poster_path || en.poster_path),
+          background:  backdropUrl(it.backdrop_path || en.backdrop_path),
           description: it.overview?.trim() || en.overview?.trim() || '',
           genres:      [],
           imdbRating:  (it.vote_average || en.vote_average) ? String((it.vote_average || en.vote_average).toFixed(1)) : undefined,
