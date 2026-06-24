@@ -14,7 +14,7 @@ const CACHE_TTL = 60 * 1000; // 1 minuto
 
 const manifest = {
   id: 'it.samuele.trakt.watchlist',
-  version: '1.0.7',
+  version: '1.0.8',
   name: 'Trakt Watchlist',
   description: 'Film e serie dalla tua watchlist Trakt',
   resources: ['catalog'],
@@ -172,60 +172,42 @@ async function getTraktWatchlist(type) {
   return res.json();
 }
 
-async function enrichWithTMDB(imdbId, traktType, tmdbIdFallback) {
+async function enrichWithTMDB(imdbId, traktType, tmdbId) {
   try {
     const tmdbType = traktType === 'movies' ? 'movie' : 'tv';
 
-    // Prova prima con IMDB ID in italiano
-    if (imdbId) {
+    // Risolvi TMDB ID se non disponibile da Trakt
+    let id = tmdbId;
+    if (!id && imdbId) {
       const res = await fetch(
         'https://api.themoviedb.org/3/find/' + imdbId +
-        '?external_source=imdb_id&language=it-IT&api_key=' + TMDB_KEY
-      );
-      const data = await res.json();
-      const results = tmdbType === 'movie' ? data.movie_results : data.tv_results;
-      if (results && results[0]) {
-        const item = results[0];
-        // Se il poster manca in italiano, riprova in inglese
-        if (!item.poster_path) {
-          const enRes = await fetch(
-            'https://api.themoviedb.org/3/find/' + imdbId +
-            '?external_source=imdb_id&language=en-US&api_key=' + TMDB_KEY
-          );
-          const enData = await enRes.json();
-          const enResults = tmdbType === 'movie' ? enData.movie_results : enData.tv_results;
-          if (enResults && enResults[0] && enResults[0].poster_path) {
-            item.poster_path = enResults[0].poster_path;
-          }
-        }
-        return item;
-      }
-    }
-
-    // Fallback diretto su TMDB ID
-    if (tmdbIdFallback) {
-      const res = await fetch(
-        'https://api.themoviedb.org/3/' + tmdbType + '/' + tmdbIdFallback +
-        '?language=it-IT&api_key=' + TMDB_KEY
+        '?external_source=imdb_id&api_key=' + TMDB_KEY
       );
       if (res.ok) {
-        const item = await res.json();
-        // Fallback poster in inglese se manca
-        if (!item.poster_path) {
-          const enRes = await fetch(
-            'https://api.themoviedb.org/3/' + tmdbType + '/' + tmdbIdFallback +
-            '?language=en-US&api_key=' + TMDB_KEY
-          );
-          if (enRes.ok) {
-            const enItem = await enRes.json();
-            if (enItem.poster_path) item.poster_path = enItem.poster_path;
-          }
-        }
-        return item;
+        const data = await res.json();
+        const results = tmdbType === 'movie' ? data.movie_results : data.tv_results;
+        if (results && results[0]) id = results[0].id;
       }
     }
+    if (!id) return null;
 
-    return null;
+    // Fetch italiano e inglese in parallelo
+    const [itRes, enRes] = await Promise.all([
+      fetch('https://api.themoviedb.org/3/' + tmdbType + '/' + id + '?language=it-IT&api_key=' + TMDB_KEY),
+      fetch('https://api.themoviedb.org/3/' + tmdbType + '/' + id + '?language=en-US&api_key=' + TMDB_KEY)
+    ]);
+    const it = itRes.ok ? await itRes.json() : null;
+    const en = enRes.ok ? await enRes.json() : null;
+    if (!it && !en) return null;
+
+    return {
+      title:        it?.title || it?.name || en?.title || en?.name,
+      overview:     (it?.overview?.trim()) || en?.overview || '',
+      poster_path:  it?.poster_path  || en?.poster_path,
+      backdrop_path: it?.backdrop_path || en?.backdrop_path,
+      genres:       (it?.genres || en?.genres || []).map(g => g.name),
+      vote_average: (it || en)?.vote_average
+    };
   } catch (e) { return null; }
 }
 
@@ -253,10 +235,13 @@ async function buildCatalog(type) {
       return {
         id: stremioId,
         type,
-        name: (tmdb && (tmdb.title || tmdb.name)) || obj.title,
-        poster: tmdb && tmdb.poster_path ? 'https://image.tmdb.org/t/p/w500' + tmdb.poster_path : null,
-        description: (tmdb && tmdb.overview) || '',
-        year: obj.year
+        name:        (tmdb && tmdb.title) || obj.title,
+        poster:      tmdb?.poster_path   ? 'https://image.tmdb.org/t/p/w780'  + tmdb.poster_path   : null,
+        background:  tmdb?.backdrop_path ? 'https://image.tmdb.org/t/p/w1280' + tmdb.backdrop_path : null,
+        description: tmdb?.overview || '',
+        genres:      tmdb?.genres || [],
+        imdbRating:  tmdb?.vote_average ? String(tmdb.vote_average.toFixed(1)) : undefined,
+        year:        obj.year
       };
     }));
     metas.push(...results);
