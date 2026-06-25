@@ -17,7 +17,7 @@ const META_CACHE_VERSION = 2; // incrementa quando cambia il formato del meta
 
 const manifest = {
   id: 'it.samuele.trakt.watchlist',
-  version: '1.1.2',
+  version: '1.1.3',
   name: 'Trakt Watchlist',
   description: 'Film e serie dalla tua watchlist Trakt',
   resources: ['catalog', 'meta'],
@@ -249,8 +249,28 @@ async function getTraktWatched(type) {
 const POSTER_SIZE   = 'original';
 const BACKDROP_SIZE = 'original';
 
-function posterUrl(path)   { return path ? 'https://image.tmdb.org/t/p/' + POSTER_SIZE   + path : null; }
-function backdropUrl(path) { return path ? 'https://image.tmdb.org/t/p/' + BACKDROP_SIZE + path : null; }
+function posterUrl(path)   {
+  if (!path) return null;
+  if (path.startsWith('http')) return path;
+  return 'https://image.tmdb.org/t/p/' + POSTER_SIZE + path;
+}
+function backdropUrl(path) {
+  if (!path) return null;
+  if (path.startsWith('http')) return path;
+  return 'https://image.tmdb.org/t/p/' + BACKDROP_SIZE + path;
+}
+
+async function getTraktImages(imdbId, traktType) {
+  try {
+    const endpoint = traktType === 'movies' ? 'movies' : 'shows';
+    const res = await fetch('https://api.trakt.tv/' + endpoint + '/' + imdbId + '?extended=images', {
+      headers: { 'trakt-api-version': '2', 'trakt-api-key': TRAKT_CLIENT_ID }
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    return data.images || null;
+  } catch (e) { return null; }
+}
 
 // Restituisce il titolo localizzato: se TMDB non ha tradotto (IT = originale)
 // E il film non è originariamente italiano, usa EN come fallback
@@ -320,13 +340,20 @@ async function enrichWithTMDB(imdbId, traktType, tmdbId) {
     const it = itRes.ok ? await itRes.json() : null;
     const en = enRes.ok ? await enRes.json() : null;
     if (!it && !en) return null;
+    let poster_path   = bestPosterPath(it?.images, it?.poster_path || en?.poster_path);
+    let backdrop_path = bestBackdropPath(it?.images, it?.backdrop_path || en?.backdrop_path);
+    // Fallback Trakt extended=images se TMDB non ha grafiche
+    if ((!poster_path || !backdrop_path) && imdbId) {
+      const ti = await getTraktImages(imdbId, traktType);
+      if (!poster_path   && ti?.poster?.full)  poster_path   = ti.poster.full;
+      if (!backdrop_path && ti?.fanart?.full)  backdrop_path = ti.fanart.full;
+    }
     return {
-      title:         localizedTitle(it, en),
-      overview:      it?.overview?.trim() || en?.overview?.trim() || '',
-      poster_path:   bestPosterPath(it?.images, it?.poster_path || en?.poster_path),
-      backdrop_path: bestBackdropPath(it?.images, it?.backdrop_path || en?.backdrop_path),
-      genres:        (it?.genres || en?.genres || []).map(g => g.name),
-      vote_average:  (it || en)?.vote_average
+      title: localizedTitle(it, en),
+      overview: it?.overview?.trim() || en?.overview?.trim() || '',
+      poster_path, backdrop_path,
+      genres:       (it?.genres || en?.genres || []).map(g => g.name),
+      vote_average: (it || en)?.vote_average
     };
   } catch (e) { return null; }
 }
@@ -376,6 +403,17 @@ async function buildMeta(type, stremioId) {
   else if (type === 'series' && base.episode_run_time?.[0]) runtime = base.episode_run_time[0] + ' min';
   const dateStr = base.release_date || base.first_air_date || '';
   const year = dateStr ? parseInt(dateStr) : undefined;
+
+  // Fallback Trakt extended=images se TMDB non ha grafiche
+  const imdbIdForTrakt = stremioId.startsWith('tt') ? stremioId : null;
+  let posterFallback   = bestPosterPath(it?.images, base.poster_path);
+  let backdropFallback = bestBackdropPath(it?.images, base.backdrop_path);
+  if ((!posterFallback || !backdropFallback) && imdbIdForTrakt) {
+    const traktType2 = type === 'movie' ? 'movies' : 'shows';
+    const ti = await getTraktImages(imdbIdForTrakt, traktType2);
+    if (!posterFallback   && ti?.poster?.full)  posterFallback   = ti.poster.full;
+    if (!backdropFallback && ti?.fanart?.full)  backdropFallback = ti.fanart.full;
+  }
 
   // Trailer: preferisce italiano, poi inglese — solo YouTube, tipo Trailer ufficiale
   const pickTrailer = videos => (videos?.results || [])
@@ -445,13 +483,13 @@ async function buildMeta(type, stremioId) {
 
   const seriesPoster = type === 'series' && seasonPosterPath
     ? posterUrl(seasonPosterPath)
-    : posterUrl(bestPosterPath(it?.images, base.poster_path));
+    : posterUrl(posterFallback);
 
   return {
     id: stremioId, type,
     name:        localizedTitle(it, en),
     poster:      seriesPoster,
-    background:  backdropUrl(bestBackdropPath(it?.images, base.backdrop_path)),
+    background:  backdropUrl(backdropFallback),
     description: overview,
     genres:      (it?.genres || en?.genres || []).map(g => g.name),
     imdbRating:  base.vote_average ? String(base.vote_average.toFixed(1)) : undefined,
