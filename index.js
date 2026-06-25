@@ -17,7 +17,7 @@ const META_CACHE_VERSION = 2; // incrementa quando cambia il formato del meta
 
 const manifest = {
   id: 'it.samuele.trakt.watchlist',
-  version: '1.1.0',
+  version: '1.1.1',
   name: 'Trakt Watchlist',
   description: 'Film e serie dalla tua watchlist Trakt',
   resources: ['catalog', 'meta'],
@@ -385,52 +385,62 @@ async function buildMeta(type, stremioId) {
   const trailers = trailerKey ? [{ source: trailerKey, type: 'Trailer' }] : [];
 
   // Episodi + poster stagione corrente per le serie
+  // Episodi: risposta immediata da episode_count, titoli reali in background
   let videos = [];
   let seasonPosterPath = null;
   if (type === 'series') {
     const seasonList = (base.seasons || []).filter(s => s.season_number > 0);
-    const SEASON_BATCH = 5;
-    for (let i = 0; i < seasonList.length; i += SEASON_BATCH) {
-      const batch = seasonList.slice(i, i + SEASON_BATCH);
-      const results = await Promise.all(batch.map(s => {
-        const ctrl = new AbortController();
-        const t = setTimeout(() => ctrl.abort(), 8000);
-        return fetch('https://api.themoviedb.org/3/tv/' + tmdbId + '/season/' + s.season_number + '?language=it-IT&api_key=' + TMDB_KEY, { signal: ctrl.signal })
-          .then(r => { clearTimeout(t); return r.ok ? r.json() : null; })
-          .catch(() => null);
-      }));
-      for (let j = 0; j < results.length; j++) {
-        const season = results[j];
-        const fallbackSeason = batch[j];
-        if (season?.poster_path) seasonPosterPath = season.poster_path;
-        else if (fallbackSeason?.poster_path) seasonPosterPath = fallbackSeason.poster_path;
-        const sNum = season?.season_number || fallbackSeason.season_number;
-        const episodes = season?.episodes;
-        if (episodes?.length) {
-          for (const ep of episodes) {
-            videos.push({
-              id:        stremioId + ':' + sNum + ':' + ep.episode_number,
-              title:     ep.name || ('Episodio ' + ep.episode_number),
-              season:    sNum,
-              episode:   ep.episode_number,
-              released:  ep.air_date ? new Date(ep.air_date).toISOString() : undefined,
-              thumbnail: ep.still_path ? 'https://image.tmdb.org/t/p/original' + ep.still_path : undefined,
-              overview:  ep.overview || undefined
-            });
-          }
-        } else {
-          // Fallback: genera episodi senza titoli se il fetch è fallito
-          const count = fallbackSeason.episode_count || 0;
-          for (let ep = 1; ep <= count; ep++) {
-            videos.push({
-              id: stremioId + ':' + sNum + ':' + ep,
-              title: 'Episodio ' + ep,
-              season: sNum, episode: ep
-            });
-          }
-        }
+    // Genera subito episodi base (veloci, nessuna chiamata extra)
+    for (const s of seasonList) {
+      if (s.poster_path) seasonPosterPath = s.poster_path;
+      for (let ep = 1; ep <= (s.episode_count || 0); ep++) {
+        videos.push({ id: stremioId + ':' + s.season_number + ':' + ep,
+          title: 'Episodio ' + ep, season: s.season_number, episode: ep });
       }
     }
+    // Arricchisce con titoli/thumbnail reali in background, aggiorna cache
+    ;(async () => {
+      try {
+        const enriched = [];
+        for (let i = 0; i < seasonList.length; i += 5) {
+          const batch = seasonList.slice(i, i + 5);
+          const results = await Promise.all(batch.map(s =>
+            tmdbFetch('https://api.themoviedb.org/3/tv/' + tmdbId + '/season/' + s.season_number + '?language=it-IT&api_key=' + TMDB_KEY)
+              .then(r => r?.ok ? r.json() : null).catch(() => null)
+          ));
+          for (let j = 0; j < results.length; j++) {
+            const season = results[j];
+            const fb = batch[j];
+            if (season?.poster_path) seasonPosterPath = season.poster_path;
+            const sNum = season?.season_number || fb.season_number;
+            if (season?.episodes?.length) {
+              for (const ep of season.episodes) {
+                enriched.push({
+                  id: stremioId + ':' + sNum + ':' + ep.episode_number,
+                  title: ep.name || ('Episodio ' + ep.episode_number),
+                  season: sNum, episode: ep.episode_number,
+                  released: ep.air_date ? new Date(ep.air_date).toISOString() : undefined,
+                  thumbnail: ep.still_path ? 'https://image.tmdb.org/t/p/original' + ep.still_path : undefined,
+                  overview: ep.overview || undefined
+                });
+              }
+            } else {
+              for (let ep = 1; ep <= (fb.episode_count || 0); ep++)
+                enriched.push({ id: stremioId + ':' + fb.season_number + ':' + ep,
+                  title: 'Episodio ' + ep, season: fb.season_number, episode: ep });
+            }
+          }
+        }
+        if (enriched.length) {
+          const key = type + ':' + stremioId;
+          if (metaCache[key]) {
+            metaCache[key].meta.videos = enriched;
+            if (seasonPosterPath) metaCache[key].meta.poster = posterUrl(seasonPosterPath);
+            setImmediate(saveCacheToDisk);
+          }
+        }
+      } catch (e) {}
+    })();
   }
 
   const seriesPoster = type === 'series' && seasonPosterPath
