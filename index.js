@@ -18,10 +18,10 @@ const META_CACHE_VERSION = 4; // incrementa quando cambia il formato del meta
 
 const manifest = {
   id: 'it.samuele.trakt.watchlist',
-  version: '1.2.3',
+  version: '1.2.4',
   name: 'Trakt Watchlist',
   description: 'Film e serie dalla tua watchlist Trakt',
-  resources: ['catalog', 'meta'],
+  resources: ['catalog', 'meta', 'stream'],
   types: ['movie', 'series'],
   catalogs: [
     { type: 'movie',  id: 'trakt-movies',        name: 'Da vedere',     extra: [{ name: 'skip' }] },
@@ -860,6 +860,25 @@ async function main() {
       console.error('Errore meta:', e.message);
       return { meta: null };
     }
+  });
+
+  builder.defineStreamHandler(({ type, id }) => {
+    const traktType = type === 'movie' ? 'movies' : 'shows';
+    const catalogId = type === 'movie' ? 'trakt-movies' : 'trakt-series';
+    const inWatchlist = !!(cache[catalogId]?.metas?.find(m => m.id === id));
+    const streams = [
+      {
+        name: 'Trakt',
+        description: inWatchlist ? '🗑️ Rimuovi dalla Watchlist' : '➕ Aggiungi alla Watchlist',
+        externalUrl: ADDON_URL + '/trakt/' + (inWatchlist ? 'remove' : 'add') + '/' + traktType + '/' + id
+      },
+      {
+        name: 'Trakt',
+        description: '✅ Segna come visto',
+        externalUrl: ADDON_URL + '/trakt/watched/' + traktType + '/' + id
+      }
+    ];
+    return { streams };
   });
 
   const app = express();
