@@ -13,10 +13,11 @@ const PORT = parseInt(process.env.PORT || '7779');
 const ADDON_URL = (process.env.ADDON_URL || 'http://192.168.178.188:7779').replace(/\/$/, '');
 const CACHE_TTL = 60 * 1000; // 1 minuto
 const META_CACHE_TTL = 24 * 60 * 60 * 1000; // 24 ore
+const META_CACHE_VERSION = 2; // incrementa quando cambia il formato del meta
 
 const manifest = {
   id: 'it.samuele.trakt.watchlist',
-  version: '1.0.38',
+  version: '1.0.39',
   name: 'Trakt Watchlist',
   description: 'Film e serie dalla tua watchlist Trakt',
   resources: ['catalog', 'meta'],
@@ -74,7 +75,7 @@ function loadCacheFromDisk() {
       cache[k] = v; // TTL verificato al momento dell'uso
     }
     for (const [k, v] of Object.entries(data.meta || {})) {
-      if (Date.now() - v.ts < META_CACHE_TTL) metaCache[k] = v;
+      if (Date.now() - v.ts < META_CACHE_TTL && v.v === META_CACHE_VERSION) metaCache[k] = v;
     }
     const nCat = Object.keys(cache).length;
     const nMeta = Object.keys(metaCache).length;
@@ -654,7 +655,8 @@ async function buildRecommendations(type) {
 function prefetchMeta(metas, stremioType) {
   const toFetch = metas.filter(meta => {
     const key = stremioType + ':' + meta.id;
-    return !metaCache[key] || (Date.now() - metaCache[key].ts) >= META_CACHE_TTL;
+    const entry = metaCache[key];
+    return !entry || entry.v !== META_CACHE_VERSION || (Date.now() - entry.ts) >= META_CACHE_TTL;
   });
   (async () => {
     const BATCH = 10;
@@ -663,7 +665,7 @@ function prefetchMeta(metas, stremioType) {
         const key = stremioType + ':' + meta.id;
         try {
           const m = await buildMeta(stremioType, meta.id);
-          if (m) metaCache[key] = { meta: m, ts: Date.now() };
+          if (m) metaCache[key] = { meta: m, ts: Date.now(), v: META_CACHE_VERSION };
         } catch (e) {}
       }));
       if (i + BATCH < toFetch.length) await new Promise(r => setTimeout(r, 200));
@@ -765,10 +767,10 @@ async function main() {
     try {
       const key = type + ':' + id;
       const entry = metaCache[key];
-      if (entry && (Date.now() - entry.ts) < META_CACHE_TTL) return { meta: entry.meta };
+      if (entry && entry.v === META_CACHE_VERSION && (Date.now() - entry.ts) < META_CACHE_TTL) return { meta: entry.meta };
       const meta = await buildMeta(type, id);
       if (!meta) return { meta: null };
-      metaCache[key] = { meta, ts: Date.now() };
+      metaCache[key] = { meta, ts: Date.now(), v: META_CACHE_VERSION };
       saveCacheToDisk();
       return { meta };
     } catch (e) {
