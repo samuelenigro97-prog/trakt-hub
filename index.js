@@ -16,7 +16,7 @@ const META_CACHE_TTL = 24 * 60 * 60 * 1000; // 24 ore
 
 const manifest = {
   id: 'it.samuele.trakt.watchlist',
-  version: '1.0.32',
+  version: '1.0.33',
   name: 'Trakt Watchlist',
   description: 'Film e serie dalla tua watchlist Trakt',
   resources: ['catalog', 'meta'],
@@ -669,6 +669,20 @@ async function main() {
     if (process.env.RENDER) throw new Error('Token mancante: imposta TRAKT_ACCESS_TOKEN nelle env vars di Render.');
     await authenticateDeviceFlow();
   }
+
+  // Warm-up: carica cataloghi e pre-fetcha tutti i meta in background
+  setTimeout(async () => {
+    try {
+      console.log('[warm-up] pre-carico cataloghi e meta...');
+      for (const [catalogId, type, stremioType] of [
+        ['trakt-movies', 'movie', 'movie'],
+        ['trakt-series', 'series', 'series']
+      ]) {
+        const metas = await getCatalogCached(catalogId, type);
+        prefetchMeta(metas, stremioType);
+      }
+    } catch (e) { console.warn('[warm-up] errore:', e.message); }
+  }, 5000);
 
   const builder = new addonBuilder(manifest);
 
