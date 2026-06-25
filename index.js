@@ -13,11 +13,11 @@ const PORT = parseInt(process.env.PORT || '7779');
 const ADDON_URL = (process.env.ADDON_URL || 'http://192.168.178.188:7779').replace(/\/$/, '');
 const CACHE_TTL = 60 * 1000; // 1 minuto
 const META_CACHE_TTL = 24 * 60 * 60 * 1000; // 24 ore
-const META_CACHE_VERSION = 3; // incrementa quando cambia il formato del meta
+const META_CACHE_VERSION = 4; // incrementa quando cambia il formato del meta
 
 const manifest = {
   id: 'it.samuele.trakt.watchlist',
-  version: '1.1.8',
+  version: '1.1.9',
   name: 'Trakt Watchlist',
   description: 'Film e serie dalla tua watchlist Trakt',
   resources: ['catalog', 'meta'],
@@ -840,25 +840,6 @@ async function main() {
 
   const app = express();
   app.get('/logo.png', (req, res) => res.sendFile(path.join(__dirname, 'logo.png')));
-
-  app.get('/debug/trakt-images/:imdbId', async (req, res) => {
-    const { imdbId } = req.params;
-    let status = 0, body = null, err = null;
-    try {
-      const r = await fetch('https://api.trakt.tv/shows/' + imdbId + '?extended=images', {
-        headers: { 'trakt-api-version': '2', 'trakt-api-key': TRAKT_CLIENT_ID, 'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36' }
-      });
-      status = r.status;
-      body = await r.json();
-    } catch (e) { err = e.message; }
-    const imgs = body?.images || {};
-    const toUrl = arr => {
-      const v = Array.isArray(arr) ? arr[0] : arr?.full;
-      if (!v) return null;
-      return 'https://' + v.replace('/medium/', '/full/');
-    };
-    res.json({ status, err, raw_poster: imgs.poster, raw_fanart: imgs.fanart, poster: toUrl(imgs.poster), fanart: toUrl(imgs.fanart) });
-  });
 
   app.use(getRouter(builder.getInterface()));
 
