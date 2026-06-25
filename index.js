@@ -18,14 +18,22 @@ const META_CACHE_VERSION = 4; // incrementa quando cambia il formato del meta
 
 const manifest = {
   id: 'it.samuele.trakt.watchlist',
-  version: '1.2.4',
+  version: '1.2.5',
   name: 'Trakt Watchlist',
   description: 'Film e serie dalla tua watchlist Trakt',
   resources: ['catalog', 'meta', 'stream'],
   types: ['movie', 'series'],
   catalogs: [
-    { type: 'movie',  id: 'trakt-movies',        name: 'Da vedere',     extra: [{ name: 'skip' }] },
-    { type: 'series', id: 'trakt-series',        name: 'Da vedere',     extra: [{ name: 'skip' }] },
+    { type: 'movie',  id: 'trakt-movies',        name: 'Da vedere', extra: [
+        { name: 'skip' },
+        { name: 'genre', options: ['Azione','Avventura','Animazione','Commedia','Crime','Documentario','Dramma','Fantasy','Horror','Mistero','Romantico','Fantascienza','Thriller','Guerra','Western'], isRequired: false }
+      ]
+    },
+    { type: 'series', id: 'trakt-series',        name: 'Da vedere', extra: [
+        { name: 'skip' },
+        { name: 'genre', options: ['Azione & Avventura','Animazione','Commedia','Crime','Documentario','Dramma','Fantascienza & Fantasy','Horror','Mistero','Reality','Thriller','Western'], isRequired: false }
+      ]
+    },
     { type: 'movie',  id: 'trakt-movies-random', name: 'Scegli per me', extra: [{ name: 'skip' }] },
     { type: 'series', id: 'trakt-series-random', name: 'Scegli per me', extra: [{ name: 'skip' }] }
   ],
@@ -837,7 +845,9 @@ async function main() {
   builder.defineCatalogHandler(async ({ type, id, extra }) => {
     try {
       const skip = parseInt(extra?.skip || 0);
-      const allMetas = await getCatalogCached(id, type);
+      const genre = extra?.genre || null;
+      let allMetas = await getCatalogCached(id, type);
+      if (genre) allMetas = allMetas.filter(m => m.genres && m.genres.includes(genre));
       const metas = allMetas.slice(skip, skip + 100);
       return { metas };
     } catch (e) {
