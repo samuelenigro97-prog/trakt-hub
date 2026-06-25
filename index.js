@@ -18,7 +18,7 @@ const META_CACHE_VERSION = 4; // incrementa quando cambia il formato del meta
 
 const manifest = {
   id: 'it.samuele.trakt.watchlist',
-  version: '1.2.1',
+  version: '1.2.2',
   name: 'Trakt Watchlist',
   description: 'Film e serie dalla tua watchlist Trakt',
   resources: ['catalog', 'meta'],
@@ -513,9 +513,12 @@ async function buildMeta(type, stremioId) {
     const catalogId = type === 'movie' ? 'trakt-movies' : 'trakt-series';
     return !!(cache[catalogId]?.metas?.find(m => m.id === stremioId));
   })();
-  const links = inWatchlist
-    ? [{ name: 'Rimuovi dalla Watchlist', category: 'Trakt', url: ADDON_URL + '/trakt/remove/' + traktActionType + '/' + stremioId }]
-    : [{ name: 'Aggiungi alla Watchlist', category: 'Trakt', url: ADDON_URL + '/trakt/add/' + traktActionType + '/' + stremioId }];
+  const links = [
+    inWatchlist
+      ? { name: 'Rimuovi dalla Watchlist', category: 'Trakt', url: ADDON_URL + '/trakt/remove/' + traktActionType + '/' + stremioId }
+      : { name: 'Aggiungi alla Watchlist', category: 'Trakt', url: ADDON_URL + '/trakt/add/' + traktActionType + '/' + stremioId },
+    { name: 'Segna come visto', category: 'Trakt', url: ADDON_URL + '/trakt/watched/' + traktActionType + '/' + stremioId }
+  ];
 
   return {
     id: stremioId, type,
@@ -917,6 +920,41 @@ a{color:${color};text-decoration:none;font-size:.9rem}</style></head>
         res.send(htmlPage('🗑️ Rimosso!', 'Il titolo è stato rimosso dalla tua Watchlist Trakt.<br>Chiudi questa pagina e aggiorna Stremio.', '#fb923c'));
       } else {
         res.status(500).send(htmlPage('❌ Errore', 'Non è stato possibile rimuovere il titolo. Riprova.', '#f87171'));
+      }
+    } catch (e) {
+      res.status(500).send(htmlPage('❌ Errore', e.message, '#f87171'));
+    }
+  });
+
+  app.get('/trakt/watched/:type/:id', async (req, res) => {
+    try {
+      const { type, id } = req.params;
+      const imdbId = id.startsWith('tt') ? id : null;
+      const tmdbId = id.startsWith('tmdb:') ? id.replace('tmdb:', '') : null;
+      const ids = imdbId ? { imdb: imdbId } : { tmdb: parseInt(tmdbId) };
+      const body = type === 'movies'
+        ? { movies: [{ ids, watched_at: new Date().toISOString() }] }
+        : { shows: [{ ids, watched_at: new Date().toISOString() }] };
+      const r = await fetch('https://api.trakt.tv/sync/history', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'trakt-api-version': '2',
+          'trakt-api-key': TRAKT_CLIENT_ID,
+          'Authorization': 'Bearer ' + accessToken
+        },
+        body: JSON.stringify(body)
+      });
+      if (r.ok) {
+        // Invalida catalogo e meta così sparisce dal Da vedere
+        const catalogId = 'trakt-' + (type === 'movies' ? 'movies' : 'series');
+        delete cache[catalogId];
+        const metaType = type === 'movies' ? 'movie' : 'series';
+        delete metaCache[metaType + ':' + id];
+        console.log('[watched] Segnato come visto:', id);
+        res.send(htmlPage('✅ Segnato come visto!', 'Trakt è stato aggiornato.<br>Chiudi questa pagina e aggiorna Stremio per vederlo scomparire dal catalogo.', '#4ade80'));
+      } else {
+        res.status(500).send(htmlPage('❌ Errore', 'Non è stato possibile aggiornare Trakt. Riprova.', '#f87171'));
       }
     } catch (e) {
       res.status(500).send(htmlPage('❌ Errore', e.message, '#f87171'));
