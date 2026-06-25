@@ -16,7 +16,7 @@ const META_CACHE_TTL = 24 * 60 * 60 * 1000; // 24 ore
 
 const manifest = {
   id: 'it.samuele.trakt.watchlist',
-  version: '1.0.25',
+  version: '1.0.26',
   name: 'Trakt Watchlist',
   description: 'Film e serie dalla tua watchlist Trakt',
   resources: ['catalog', 'meta'],
@@ -208,7 +208,7 @@ async function traktGet(url, etagKey) {
 }
 
 async function getTraktWatchlist(type) {
-  const url = 'https://api.trakt.tv/users/' + TRAKT_USER + '/watchlist/' + type + '?limit=500';
+  const url = 'https://api.trakt.tv/users/' + TRAKT_USER + '/watchlist/' + type + '?limit=500&sort_by=listed_at&sort_how=desc';
   const result = await traktGet(url, 'watchlist-' + type);
   return result.notModified ? null : result.data;
 }
