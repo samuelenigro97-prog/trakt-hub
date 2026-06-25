@@ -16,18 +16,16 @@ const META_CACHE_TTL = 24 * 60 * 60 * 1000; // 24 ore
 
 const manifest = {
   id: 'it.samuele.trakt.watchlist',
-  version: '1.0.31',
+  version: '1.0.32',
   name: 'Trakt Watchlist',
   description: 'Film e serie dalla tua watchlist Trakt',
   resources: ['catalog', 'meta'],
   types: ['movie', 'series'],
   catalogs: [
-    { type: 'movie',  id: 'trakt-movies',             name: 'Da vedere',     extra: [{ name: 'skip' }] },
-    { type: 'series', id: 'trakt-series',             name: 'Da vedere',     extra: [{ name: 'skip' }] },
-    { type: 'movie',  id: 'trakt-movies-recommended', name: 'Consigliati',   extra: [{ name: 'skip' }] },
-    { type: 'series', id: 'trakt-series-recommended', name: 'Consigliati',   extra: [{ name: 'skip' }] },
-    { type: 'movie',  id: 'trakt-movies-random',      name: 'Scegli per me', extra: [{ name: 'skip' }] },
-    { type: 'series', id: 'trakt-series-random',      name: 'Scegli per me', extra: [{ name: 'skip' }] }
+    { type: 'movie',  id: 'trakt-movies',        name: 'Da vedere',     extra: [{ name: 'skip' }] },
+    { type: 'series', id: 'trakt-series',        name: 'Da vedere',     extra: [{ name: 'skip' }] },
+    { type: 'movie',  id: 'trakt-movies-random', name: 'Scegli per me', extra: [{ name: 'skip' }] },
+    { type: 'series', id: 'trakt-series-random', name: 'Scegli per me', extra: [{ name: 'skip' }] }
   ],
   idPrefixes: ['tt', 'tmdb:'],
   logo: ADDON_URL + '/logo.png',
