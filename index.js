@@ -16,7 +16,7 @@ const META_CACHE_TTL = 24 * 60 * 60 * 1000; // 24 ore
 
 const manifest = {
   id: 'it.samuele.trakt.watchlist',
-  version: '1.0.23',
+  version: '1.0.24',
   name: 'Trakt Watchlist',
   description: 'Film e serie dalla tua watchlist Trakt',
   resources: ['catalog', 'meta'],
@@ -324,8 +324,8 @@ async function buildMeta(type, stremioId) {
     tmdbId = results[0].id;
   }
   const [itRes, enRes] = await Promise.all([
-    fetch('https://api.themoviedb.org/3/' + tmdbType + '/' + tmdbId + '?language=it-IT&append_to_response=credits,images&include_image_language=it,en,null&api_key=' + TMDB_KEY),
-    fetch('https://api.themoviedb.org/3/' + tmdbType + '/' + tmdbId + '?language=en-US&append_to_response=credits&api_key=' + TMDB_KEY)
+    fetch('https://api.themoviedb.org/3/' + tmdbType + '/' + tmdbId + '?language=it-IT&append_to_response=credits,images,videos&include_image_language=it,en,null&api_key=' + TMDB_KEY),
+    fetch('https://api.themoviedb.org/3/' + tmdbType + '/' + tmdbId + '?language=en-US&append_to_response=credits,videos&api_key=' + TMDB_KEY)
   ]);
   const it = itRes.ok ? await itRes.json() : null;
   const en = enRes.ok ? await enRes.json() : null;
@@ -347,6 +347,14 @@ async function buildMeta(type, stremioId) {
   else if (type === 'series' && base.episode_run_time?.[0]) runtime = base.episode_run_time[0] + ' min';
   const dateStr = base.release_date || base.first_air_date || '';
   const year = dateStr ? parseInt(dateStr) : undefined;
+
+  // Trailer: preferisce italiano, poi inglese — solo YouTube, tipo Trailer ufficiale
+  const pickTrailer = videos => (videos?.results || [])
+    .filter(v => v.site === 'YouTube' && v.type === 'Trailer' && v.official)
+    .sort((a, b) => new Date(b.published_at) - new Date(a.published_at))[0]?.key;
+  const trailerKey = pickTrailer(it?.videos) || pickTrailer(en?.videos);
+  const trailers = trailerKey ? [{ source: trailerKey, type: 'Trailer' }] : [];
+
   return {
     id: stremioId, type,
     name:        it?.title || it?.name || en?.title || en?.name,
@@ -355,7 +363,7 @@ async function buildMeta(type, stremioId) {
     description: overview,
     genres:      (it?.genres || en?.genres || []).map(g => g.name),
     imdbRating:  base.vote_average ? String(base.vote_average.toFixed(1)) : undefined,
-    year, cast, director, runtime,
+    year, cast, director, runtime, trailers,
     name:        localizedTitle(it, en)
   };
 }
