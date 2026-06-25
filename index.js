@@ -16,7 +16,7 @@ const META_CACHE_TTL = 24 * 60 * 60 * 1000; // 24 ore
 
 const manifest = {
   id: 'it.samuele.trakt.watchlist',
-  version: '1.0.29',
+  version: '1.0.30',
   name: 'Trakt Watchlist',
   description: 'Film e serie dalla tua watchlist Trakt',
   resources: ['catalog', 'meta'],
@@ -571,8 +571,10 @@ function prefetchMeta(metas, stremioType) {
   })();
 }
 
-function buildRandom(type) {
+async function buildRandom(type) {
   const sourceCatalogId = type === 'movie' ? 'trakt-movies' : 'trakt-series';
+  // Assicurati che il catalogo Da vedere sia in cache
+  if (!cache[sourceCatalogId]) await getCatalogCached(sourceCatalogId, type);
   const source = cache[sourceCatalogId]?.metas || [];
   if (!source.length) return [];
   const shuffled = [...source].sort(() => Math.random() - 0.5);
@@ -585,7 +587,7 @@ async function getCatalogCached(catalogId, type) {
   const isRandom = catalogId.includes('random');
 
   // Random: nessuna cache, shuffle ad ogni apertura
-  if (isRandom) return buildRandom(type);
+  if (isRandom) return await buildRandom(type);
 
   if (entry && (Date.now() - entry.ts) < CACHE_TTL) return entry.metas;
 
