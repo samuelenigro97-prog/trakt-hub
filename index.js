@@ -11,13 +11,14 @@ const TOKEN_FILE = path.join(__dirname, 'trakt_token.json');
 const CACHE_FILE = path.join(__dirname, 'cache_data.json');
 const PORT = parseInt(process.env.PORT || '7779');
 const ADDON_URL = (process.env.ADDON_URL || 'http://192.168.178.188:7779').replace(/\/$/, '');
+const CLEAR_CACHE_TOKEN = 'samuele-clear-2024';
 const CACHE_TTL = 60 * 1000; // 1 minuto
 const META_CACHE_TTL = 24 * 60 * 60 * 1000; // 24 ore
 const META_CACHE_VERSION = 4; // incrementa quando cambia il formato del meta
 
 const manifest = {
   id: 'it.samuele.trakt.watchlist',
-  version: '1.1.9',
+  version: '1.2.0',
   name: 'Trakt Watchlist',
   description: 'Film e serie dalla tua watchlist Trakt',
   resources: ['catalog', 'meta'],
@@ -414,6 +415,16 @@ async function buildMeta(type, stremioId) {
   else if (type === 'series' && base.episode_run_time?.[0]) runtime = base.episode_run_time[0] + ' min';
   const dateStr = base.release_date || base.first_air_date || '';
   const year = dateStr ? parseInt(dateStr) : undefined;
+
+  // Badge data uscita per titoli non ancora usciti
+  if (dateStr) {
+    const releaseDate = new Date(dateStr);
+    if (releaseDate > new Date()) {
+      const formatted = releaseDate.toLocaleDateString('it-IT', { day: 'numeric', month: 'long', year: 'numeric' });
+      const label = type === 'movie' ? 'Uscita prevista' : 'Prima stagione dal';
+      overview = (overview ? overview + '\n\n' : '') + '📅 ' + label + ': ' + formatted;
+    }
+  }
 
   // Fallback Trakt extended=images se TMDB non ha grafiche
   const imdbIdForTrakt = stremioId.startsWith('tt') ? stremioId : null;
@@ -840,6 +851,17 @@ async function main() {
 
   const app = express();
   app.get('/logo.png', (req, res) => res.sendFile(path.join(__dirname, 'logo.png')));
+
+  app.get('/clear-cache/:token', (req, res) => {
+    if (req.params.token !== CLEAR_CACHE_TOKEN) return res.status(403).json({ error: 'Non autorizzato' });
+    const catalogCount = Object.keys(cache).length;
+    const metaCount = Object.keys(metaCache).length;
+    for (const k of Object.keys(cache)) delete cache[k];
+    for (const k of Object.keys(metaCache)) delete metaCache[k];
+    try { fs.unlinkSync(CACHE_FILE); } catch (e) {}
+    console.log('[clear-cache] Cache svuotata manualmente');
+    res.json({ ok: true, rimossi: { catalog: catalogCount, meta: metaCount } });
+  });
 
   app.use(getRouter(builder.getInterface()));
 
