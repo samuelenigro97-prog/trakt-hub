@@ -17,7 +17,7 @@ const META_CACHE_VERSION = 2; // incrementa quando cambia il formato del meta
 
 const manifest = {
   id: 'it.samuele.trakt.watchlist',
-  version: '1.0.40',
+  version: '1.0.41',
   name: 'Trakt Watchlist',
   description: 'Film e serie dalla tua watchlist Trakt',
   resources: ['catalog', 'meta'],
@@ -60,11 +60,10 @@ function clearCache() {
 // ─── Persistent cache su disco ───────────────────────────────────────────────
 
 function saveCacheToDisk() {
-  try {
-    fs.writeFileSync(CACHE_FILE, JSON.stringify({ catalog: cache, meta: metaCache }));
-  } catch (e) {
-    console.warn('[cache-disk] Errore salvataggio:', e.message);
-  }
+  const data = JSON.stringify({ catalog: cache, meta: metaCache });
+  fs.writeFile(CACHE_FILE, data, e => {
+    if (e) console.warn('[cache-disk] Errore salvataggio:', e.message);
+  });
 }
 
 function loadCacheFromDisk() {
@@ -762,7 +761,7 @@ async function main() {
       const meta = await buildMeta(type, id);
       if (!meta) return { meta: null };
       metaCache[key] = { meta, ts: Date.now(), v: META_CACHE_VERSION };
-      saveCacheToDisk();
+      setImmediate(saveCacheToDisk);
       return { meta };
     } catch (e) {
       console.error('Errore meta:', e.message);
