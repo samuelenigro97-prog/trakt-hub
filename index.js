@@ -18,32 +18,16 @@ const META_CACHE_VERSION = 4; // incrementa quando cambia il formato del meta
 
 const manifest = {
   id: 'it.samuele.trakt.watchlist',
-  version: '1.2.7',
+  version: '1.2.8',
   name: 'Trakt Watchlist',
   description: 'Film e serie dalla tua watchlist Trakt',
   resources: ['catalog', 'meta', 'stream'],
   types: ['movie', 'series'],
   catalogs: [
-    { type: 'movie',  id: 'trakt-movies',        name: 'Da vedere', extra: [
-        { name: 'skip' },
-        { name: 'genre', options: ['Azione','Avventura','Animazione','Commedia','Crime','Documentario','Dramma','Fantasy','Horror','Mistero','Romantico','Fantascienza','Thriller','Guerra','Western'], isRequired: false }
-      ]
-    },
-    { type: 'series', id: 'trakt-series',        name: 'Da vedere', extra: [
-        { name: 'skip' },
-        { name: 'genre', options: ['Azione & Avventura','Animazione','Commedia','Crime','Documentario','Dramma','Fantascienza & Fantasy','Horror','Mistero','Reality','Thriller','Western'], isRequired: false }
-      ]
-    },
-    { type: 'movie',  id: 'trakt-movies-random', name: 'Scegli per me', extra: [
-        { name: 'skip' },
-        { name: 'genre', options: ['Azione','Avventura','Animazione','Commedia','Crime','Documentario','Dramma','Fantasy','Horror','Mistero','Romantico','Fantascienza','Thriller','Guerra','Western'], isRequired: false }
-      ]
-    },
-    { type: 'series', id: 'trakt-series-random', name: 'Scegli per me', extra: [
-        { name: 'skip' },
-        { name: 'genre', options: ['Azione & Avventura','Animazione','Commedia','Crime','Documentario','Dramma','Fantascienza & Fantasy','Horror','Mistero','Reality','Thriller','Western'], isRequired: false }
-      ]
-    }
+    { type: 'movie',  id: 'trakt-movies',        name: 'Da vedere',     extra: [{ name: 'skip' }, { name: 'genre' }] },
+    { type: 'series', id: 'trakt-series',        name: 'Da vedere',     extra: [{ name: 'skip' }, { name: 'genre' }] },
+    { type: 'movie',  id: 'trakt-movies-random', name: 'Scegli per me', extra: [{ name: 'skip' }, { name: 'genre' }] },
+    { type: 'series', id: 'trakt-series-random', name: 'Scegli per me', extra: [{ name: 'skip' }, { name: 'genre' }] }
   ],
   idPrefixes: ['tt', 'tmdb:'],
   logo: ADDON_URL + '/logo.png',
