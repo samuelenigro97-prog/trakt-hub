@@ -17,7 +17,7 @@ const META_CACHE_VERSION = 3; // incrementa quando cambia il formato del meta
 
 const manifest = {
   id: 'it.samuele.trakt.watchlist',
-  version: '1.1.7',
+  version: '1.1.8',
   name: 'Trakt Watchlist',
   description: 'Film e serie dalla tua watchlist Trakt',
   resources: ['catalog', 'meta'],
@@ -264,7 +264,11 @@ async function getTraktImages(imdbId, traktType) {
   try {
     const endpoint = traktType === 'movies' ? 'movies' : 'shows';
     const res = await fetch('https://api.trakt.tv/' + endpoint + '/' + imdbId + '?extended=images', {
-      headers: { 'trakt-api-version': '2', 'trakt-api-key': TRAKT_CLIENT_ID }
+      headers: {
+        'trakt-api-version': '2',
+        'trakt-api-key': TRAKT_CLIENT_ID,
+        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+      }
     });
     if (!res.ok) return null;
     const data = await res.json();
@@ -842,7 +846,7 @@ async function main() {
     let status = 0, body = null, err = null;
     try {
       const r = await fetch('https://api.trakt.tv/shows/' + imdbId + '?extended=images', {
-        headers: { 'trakt-api-version': '2', 'trakt-api-key': TRAKT_CLIENT_ID }
+        headers: { 'trakt-api-version': '2', 'trakt-api-key': TRAKT_CLIENT_ID, 'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36' }
       });
       status = r.status;
       body = await r.json();
