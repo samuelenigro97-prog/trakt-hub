@@ -17,7 +17,7 @@ const META_CACHE_VERSION = 3; // incrementa quando cambia il formato del meta
 
 const manifest = {
   id: 'it.samuele.trakt.watchlist',
-  version: '1.1.6',
+  version: '1.1.7',
   name: 'Trakt Watchlist',
   description: 'Film e serie dalla tua watchlist Trakt',
   resources: ['catalog', 'meta'],
@@ -839,16 +839,21 @@ async function main() {
 
   app.get('/debug/trakt-images/:imdbId', async (req, res) => {
     const { imdbId } = req.params;
-    const raw = await fetch('https://api.trakt.tv/shows/' + imdbId + '?extended=images', {
-      headers: { 'trakt-api-version': '2', 'trakt-api-key': TRAKT_CLIENT_ID }
-    }).then(r => r.ok ? r.json() : null).catch(() => null);
-    const imgs = raw?.images || {};
+    let status = 0, body = null, err = null;
+    try {
+      const r = await fetch('https://api.trakt.tv/shows/' + imdbId + '?extended=images', {
+        headers: { 'trakt-api-version': '2', 'trakt-api-key': TRAKT_CLIENT_ID }
+      });
+      status = r.status;
+      body = await r.json();
+    } catch (e) { err = e.message; }
+    const imgs = body?.images || {};
     const toUrl = arr => {
-      const r = Array.isArray(arr) ? arr[0] : arr?.full;
-      if (!r) return null;
-      return 'https://' + r.replace('/medium/', '/full/');
+      const v = Array.isArray(arr) ? arr[0] : arr?.full;
+      if (!v) return null;
+      return 'https://' + v.replace('/medium/', '/full/');
     };
-    res.json({ raw_poster: imgs.poster, raw_fanart: imgs.fanart, poster: toUrl(imgs.poster), fanart: toUrl(imgs.fanart) });
+    res.json({ status, err, raw_poster: imgs.poster, raw_fanart: imgs.fanart, poster: toUrl(imgs.poster), fanart: toUrl(imgs.fanart) });
   });
 
   app.use(getRouter(builder.getInterface()));
