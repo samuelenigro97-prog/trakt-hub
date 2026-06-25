@@ -13,11 +13,11 @@ const PORT = parseInt(process.env.PORT || '7779');
 const ADDON_URL = (process.env.ADDON_URL || 'http://192.168.178.188:7779').replace(/\/$/, '');
 const CACHE_TTL = 60 * 1000; // 1 minuto
 const META_CACHE_TTL = 24 * 60 * 60 * 1000; // 24 ore
-const META_CACHE_VERSION = 2; // incrementa quando cambia il formato del meta
+const META_CACHE_VERSION = 3; // incrementa quando cambia il formato del meta
 
 const manifest = {
   id: 'it.samuele.trakt.watchlist',
-  version: '1.1.4',
+  version: '1.1.5',
   name: 'Trakt Watchlist',
   description: 'Film e serie dalla tua watchlist Trakt',
   resources: ['catalog', 'meta'],
