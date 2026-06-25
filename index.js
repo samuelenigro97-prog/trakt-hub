@@ -16,14 +16,14 @@ const META_CACHE_TTL = 24 * 60 * 60 * 1000; // 24 ore
 
 const manifest = {
   id: 'it.samuele.trakt.watchlist',
-  version: '1.0.26',
+  version: '1.0.27',
   name: 'Trakt Watchlist',
   description: 'Film e serie dalla tua watchlist Trakt',
   resources: ['catalog', 'meta'],
   types: ['movie', 'series'],
   catalogs: [
-    { type: 'movie',  id: 'trakt-movies',            name: 'Da vedere' },
-    { type: 'series', id: 'trakt-series',            name: 'Da vedere' },
+    { type: 'movie',  id: 'trakt-movies',             name: 'Da vedere' },
+    { type: 'series', id: 'trakt-series',             name: 'Da vedere' },
     { type: 'movie',  id: 'trakt-movies-recommended', name: 'Consigliati' },
     { type: 'series', id: 'trakt-series-recommended', name: 'Consigliati' }
   ],
@@ -208,9 +208,22 @@ async function traktGet(url, etagKey) {
 }
 
 async function getTraktWatchlist(type) {
-  const url = 'https://api.trakt.tv/users/' + TRAKT_USER + '/watchlist/' + type + '?limit=500&sort_by=listed_at&sort_how=desc';
-  const result = await traktGet(url, 'watchlist-' + type);
-  return result.notModified ? null : result.data;
+  const firstUrl = 'https://api.trakt.tv/users/' + TRAKT_USER + '/watchlist/' + type + '?limit=500&page=1&sort_by=listed_at&sort_how=desc';
+  const first = await traktGet(firstUrl, 'watchlist-' + type);
+  if (first.notModified) return null;
+  const items = first.data || [];
+  if (items.length < 500) return items;
+  // Pagina 2+ senza ETag (già sappiamo che c'è un aggiornamento)
+  let page = 2;
+  while (true) {
+    const url = 'https://api.trakt.tv/users/' + TRAKT_USER + '/watchlist/' + type + '?limit=500&page=' + page + '&sort_by=listed_at&sort_how=desc';
+    const res = await traktGet(url, null);
+    if (!res.data || !res.data.length) break;
+    items.push(...res.data);
+    if (res.data.length < 500) break;
+    page++;
+  }
+  return items;
 }
 
 const watchedCache = {};
