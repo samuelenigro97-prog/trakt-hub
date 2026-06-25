@@ -17,7 +17,7 @@ const META_CACHE_VERSION = 3; // incrementa quando cambia il formato del meta
 
 const manifest = {
   id: 'it.samuele.trakt.watchlist',
-  version: '1.1.5',
+  version: '1.1.6',
   name: 'Trakt Watchlist',
   description: 'Film e serie dalla tua watchlist Trakt',
   resources: ['catalog', 'meta'],
@@ -836,6 +836,21 @@ async function main() {
 
   const app = express();
   app.get('/logo.png', (req, res) => res.sendFile(path.join(__dirname, 'logo.png')));
+
+  app.get('/debug/trakt-images/:imdbId', async (req, res) => {
+    const { imdbId } = req.params;
+    const raw = await fetch('https://api.trakt.tv/shows/' + imdbId + '?extended=images', {
+      headers: { 'trakt-api-version': '2', 'trakt-api-key': TRAKT_CLIENT_ID }
+    }).then(r => r.ok ? r.json() : null).catch(() => null);
+    const imgs = raw?.images || {};
+    const toUrl = arr => {
+      const r = Array.isArray(arr) ? arr[0] : arr?.full;
+      if (!r) return null;
+      return 'https://' + r.replace('/medium/', '/full/');
+    };
+    res.json({ raw_poster: imgs.poster, raw_fanart: imgs.fanart, poster: toUrl(imgs.poster), fanart: toUrl(imgs.fanart) });
+  });
+
   app.use(getRouter(builder.getInterface()));
 
   app.listen(PORT, () => {
