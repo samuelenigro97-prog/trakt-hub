@@ -16,10 +16,13 @@ const META_CACHE_TTL = 24 * 60 * 60 * 1000; // 24 ore
 
 const manifest = {
   id: 'it.samuele.trakt.watchlist',
-  version: '1.0.35',
+  version: '1.0.36',
   name: 'Trakt Watchlist',
   description: 'Film e serie dalla tua watchlist Trakt',
-  resources: ['catalog', 'meta'],
+  resources: [
+    'catalog',
+    { name: 'meta', types: ['movie'], idPrefixes: ['tt', 'tmdb:'] }
+  ],
   types: ['movie', 'series'],
   catalogs: [
     { type: 'movie',  id: 'trakt-movies',        name: 'Da vedere',     extra: [{ name: 'skip' }] },
@@ -726,6 +729,8 @@ async function main() {
   });
 
   builder.defineMetaHandler(async ({ type, id }) => {
+    // Solo film: le serie le gestisce Cinemeta che ha la lista episodi completa
+    if (type !== 'movie') return { meta: null };
     try {
       const key = type + ':' + id;
       const entry = metaCache[key];
