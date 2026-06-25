@@ -16,7 +16,7 @@ const META_CACHE_TTL = 24 * 60 * 60 * 1000; // 24 ore
 
 const manifest = {
   id: 'it.samuele.trakt.watchlist',
-  version: '1.0.24',
+  version: '1.0.25',
   name: 'Trakt Watchlist',
   description: 'Film e serie dalla tua watchlist Trakt',
   resources: ['catalog', 'meta'],
@@ -213,12 +213,16 @@ async function getTraktWatchlist(type) {
   return result.notModified ? null : result.data;
 }
 
+const watchedCache = {};
+
 async function getTraktWatched(type) {
   try {
     const url = 'https://api.trakt.tv/users/' + TRAKT_USER + '/watched/' + type;
     const result = await traktGet(url, 'watched-' + type);
-    return result.notModified ? [] : (result.data || []);
-  } catch (e) { return []; }
+    if (result.notModified) return watchedCache[type] || [];
+    watchedCache[type] = result.data || [];
+    return watchedCache[type];
+  } catch (e) { return watchedCache[type] || []; }
 }
 
 // Rimosse le raccomandazioni Trakt (richiedono premium) → sostituite con TMDB
