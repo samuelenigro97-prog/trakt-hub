@@ -16,7 +16,7 @@ const META_CACHE_TTL = 24 * 60 * 60 * 1000; // 24 ore
 
 const manifest = {
   id: 'it.samuele.trakt.watchlist',
-  version: '1.0.34',
+  version: '1.0.35',
   name: 'Trakt Watchlist',
   description: 'Film e serie dalla tua watchlist Trakt',
   resources: ['catalog', 'meta'],
@@ -87,30 +87,31 @@ function loadCacheFromDisk() {
 // ─── Token ───────────────────────────────────────────────────────────────────
 
 function loadToken() {
+  // File prima: ha il token più recente dopo ogni refresh
+  try {
+    if (fs.existsSync(TOKEN_FILE)) {
+      const data = JSON.parse(fs.readFileSync(TOKEN_FILE, 'utf8'));
+      if (data.access_token) {
+        accessToken = data.access_token;
+        refreshToken = data.refresh_token || null;
+        console.log('Token Trakt caricato da file');
+        return true;
+      }
+    }
+  } catch (e) {}
+  // Fallback: env var (primo avvio su Render, prima ancora del primo refresh)
   if (process.env.TRAKT_ACCESS_TOKEN) {
     accessToken = process.env.TRAKT_ACCESS_TOKEN;
     refreshToken = process.env.TRAKT_REFRESH_TOKEN || null;
     console.log('Token Trakt caricato da variabile d\'ambiente');
     return true;
   }
-  try {
-    if (fs.existsSync(TOKEN_FILE)) {
-      const data = JSON.parse(fs.readFileSync(TOKEN_FILE, 'utf8'));
-      accessToken = data.access_token;
-      refreshToken = data.refresh_token || null;
-      console.log('Token Trakt caricato da', TOKEN_FILE);
-      return true;
-    }
-  } catch (e) {
-    console.error('Errore lettura token:', e.message);
-  }
   return false;
 }
 
 function saveToken(tokenData) {
-  if (!process.env.TRAKT_ACCESS_TOKEN) {
-    fs.writeFileSync(TOKEN_FILE, JSON.stringify(tokenData, null, 2));
-  }
+  // Salva sempre su file così il token refreshato sopravvive ai riavvii
+  try { fs.writeFileSync(TOKEN_FILE, JSON.stringify(tokenData, null, 2)); } catch (e) {}
   accessToken = tokenData.access_token;
   refreshToken = tokenData.refresh_token || refreshToken;
 }
@@ -404,6 +405,16 @@ function metaFromTmdb(tmdb, obj, type) {
   };
 }
 
+function lastWatchedEp(watchedShow) {
+  const seasons = (watchedShow.seasons || []).filter(s => s.number > 0);
+  if (!seasons.length) return null;
+  const lastSeason = seasons.reduce((a, b) => a.number > b.number ? a : b);
+  const eps = lastSeason.episodes || [];
+  if (!eps.length) return null;
+  const lastEp = eps.reduce((a, b) => a.number > b.number ? a : b);
+  return 'S' + lastSeason.number + 'E' + lastEp.number;
+}
+
 async function enrichBatch(items, traktType, type) {
   const BATCH = 10;
   const metas = [];
@@ -475,6 +486,8 @@ async function buildCatalog(type) {
 
   const watchedImdb = new Set();
   const watchedTmdb = new Set();
+  const progressByImdb = new Map();
+  const progressByTmdb = new Map();
   for (const w of watched) {
     const obj = w.movie || w.show;
     if (!obj) continue;
@@ -485,11 +498,16 @@ async function buildCatalog(type) {
       const aired = airedByImdb.get(obj.ids.imdb) || airedByTmdb.get(obj.ids.tmdb) || 0;
       const seen = (w.seasons || []).reduce((tot, s) => tot + s.episodes.length, 0);
       const seasonsWatched = (w.seasons || []).filter(s => s.number > 0);
-      // Completa se: episodi visti >= andati in onda, OPPURE aired sconosciuto ma ha visto stagioni intere
       const isComplete = (aired > 0 && seen >= aired) || (aired === 0 && seasonsWatched.length > 0 && seen >= 6);
       if (isComplete) {
         if (obj.ids.imdb) watchedImdb.add(obj.ids.imdb);
         if (obj.ids.tmdb) watchedTmdb.add(obj.ids.tmdb);
+      } else {
+        const ep = lastWatchedEp(w);
+        if (ep) {
+          if (obj.ids.imdb) progressByImdb.set(obj.ids.imdb, ep);
+          if (obj.ids.tmdb) progressByTmdb.set(String(obj.ids.tmdb), ep);
+        }
       }
     }
   }
@@ -509,7 +527,17 @@ async function buildCatalog(type) {
     })
     .map(item => item.movie || item.show);
 
-  return enrichBatch(validObjs, traktType, type);
+  const metas = await enrichBatch(validObjs, traktType, type);
+
+  // Aggiunge progresso "• S2E4" al nome delle serie parzialmente viste
+  if (type === 'series') {
+    for (const meta of metas) {
+      const prog = progressByImdb.get(meta.id) || progressByTmdb.get(meta.tmdbId);
+      if (prog) meta.name = meta.name + ' • ' + prog;
+    }
+  }
+
+  return metas;
 }
 
 async function buildRecommendations(type) {
