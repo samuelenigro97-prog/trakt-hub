@@ -17,7 +17,7 @@ const META_CACHE_VERSION = 2; // incrementa quando cambia il formato del meta
 
 const manifest = {
   id: 'it.samuele.trakt.watchlist',
-  version: '1.1.1',
+  version: '1.1.2',
   name: 'Trakt Watchlist',
   description: 'Film e serie dalla tua watchlist Trakt',
   resources: ['catalog', 'meta'],
@@ -477,15 +477,6 @@ function metaFromTmdb(tmdb, obj, type) {
   };
 }
 
-function lastWatchedEp(watchedShow) {
-  const seasons = (watchedShow.seasons || []).filter(s => s.number > 0);
-  if (!seasons.length) return null;
-  const lastSeason = seasons.reduce((a, b) => a.number > b.number ? a : b);
-  const eps = lastSeason.episodes || [];
-  if (!eps.length) return null;
-  const lastEp = eps.reduce((a, b) => a.number > b.number ? a : b);
-  return 'S' + lastSeason.number + 'E' + lastEp.number;
-}
 
 async function enrichBatch(items, traktType, type) {
   const BATCH = 10;
@@ -558,8 +549,6 @@ async function buildCatalog(type) {
 
   const watchedImdb = new Set();
   const watchedTmdb = new Set();
-  const progressByImdb = new Map();
-  const progressByTmdb = new Map();
   for (const w of watched) {
     const obj = w.movie || w.show;
     if (!obj) continue;
@@ -574,12 +563,6 @@ async function buildCatalog(type) {
       if (isComplete) {
         if (obj.ids.imdb) watchedImdb.add(obj.ids.imdb);
         if (obj.ids.tmdb) watchedTmdb.add(obj.ids.tmdb);
-      } else {
-        const ep = lastWatchedEp(w);
-        if (ep) {
-          if (obj.ids.imdb) progressByImdb.set(obj.ids.imdb, ep);
-          if (obj.ids.tmdb) progressByTmdb.set(String(obj.ids.tmdb), ep);
-        }
       }
     }
   }
@@ -599,17 +582,7 @@ async function buildCatalog(type) {
     })
     .map(item => item.movie || item.show);
 
-  const metas = await enrichBatch(validObjs, traktType, type);
-
-  // Aggiunge progresso "• S2E4" al nome delle serie parzialmente viste
-  if (type === 'series') {
-    for (const meta of metas) {
-      const prog = progressByImdb.get(meta.id) || progressByTmdb.get(meta.tmdbId);
-      if (prog) meta.name = meta.name + ' • ' + prog;
-    }
-  }
-
-  return metas;
+  return enrichBatch(validObjs, traktType, type);
 }
 
 async function buildRecommendations(type) {
