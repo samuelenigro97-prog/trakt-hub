@@ -16,7 +16,7 @@ const META_CACHE_TTL = 24 * 60 * 60 * 1000; // 24 ore
 
 const manifest = {
   id: 'it.samuele.trakt.watchlist',
-  version: '1.0.37',
+  version: '1.0.38',
   name: 'Trakt Watchlist',
   description: 'Film e serie dalla tua watchlist Trakt',
   resources: ['catalog', 'meta'],
@@ -376,8 +376,9 @@ async function buildMeta(type, stremioId) {
   const trailerKey = pickTrailer(it?.videos) || pickTrailer(en?.videos);
   const trailers = trailerKey ? [{ source: trailerKey, type: 'Trailer' }] : [];
 
-  // Episodi per le serie (necessari per il selettore puntate in Stremio)
+  // Episodi + poster stagione corrente per le serie
   let videos = [];
+  let seasonPosterPath = null;
   if (type === 'series') {
     const seasonList = (base.seasons || []).filter(s => s.season_number > 0);
     const SEASON_BATCH = 5;
@@ -389,6 +390,8 @@ async function buildMeta(type, stremioId) {
       ));
       for (const season of results) {
         if (!season) continue;
+        // Tieni il poster della stagione più recente con poster disponibile
+        if (season.poster_path) seasonPosterPath = season.poster_path;
         for (const ep of season.episodes || []) {
           videos.push({
             id:       stremioId + ':' + season.season_number + ':' + ep.episode_number,
@@ -396,7 +399,7 @@ async function buildMeta(type, stremioId) {
             season:   season.season_number,
             episode:  ep.episode_number,
             released: ep.air_date ? new Date(ep.air_date).toISOString() : undefined,
-            thumbnail: ep.still_path ? 'https://image.tmdb.org/t/p/w300' + ep.still_path : undefined,
+            thumbnail: ep.still_path ? 'https://image.tmdb.org/t/p/original' + ep.still_path : undefined,
             overview: ep.overview || undefined
           });
         }
@@ -404,10 +407,14 @@ async function buildMeta(type, stremioId) {
     }
   }
 
+  const seriesPoster = type === 'series' && seasonPosterPath
+    ? posterUrl(seasonPosterPath)
+    : posterUrl(bestPosterPath(it?.images, base.poster_path));
+
   return {
     id: stremioId, type,
     name:        localizedTitle(it, en),
-    poster:      posterUrl(bestPosterPath(it?.images, base.poster_path)),
+    poster:      seriesPoster,
     background:  backdropUrl(bestBackdropPath(it?.images, base.backdrop_path)),
     description: overview,
     genres:      (it?.genres || en?.genres || []).map(g => g.name),
