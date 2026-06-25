@@ -16,16 +16,18 @@ const META_CACHE_TTL = 24 * 60 * 60 * 1000; // 24 ore
 
 const manifest = {
   id: 'it.samuele.trakt.watchlist',
-  version: '1.0.28',
+  version: '1.0.29',
   name: 'Trakt Watchlist',
   description: 'Film e serie dalla tua watchlist Trakt',
   resources: ['catalog', 'meta'],
   types: ['movie', 'series'],
   catalogs: [
-    { type: 'movie',  id: 'trakt-movies',             name: 'Da vedere',   extra: [{ name: 'skip' }] },
-    { type: 'series', id: 'trakt-series',             name: 'Da vedere',   extra: [{ name: 'skip' }] },
-    { type: 'movie',  id: 'trakt-movies-recommended', name: 'Consigliati', extra: [{ name: 'skip' }] },
-    { type: 'series', id: 'trakt-series-recommended', name: 'Consigliati', extra: [{ name: 'skip' }] }
+    { type: 'movie',  id: 'trakt-movies',             name: 'Da vedere',     extra: [{ name: 'skip' }] },
+    { type: 'series', id: 'trakt-series',             name: 'Da vedere',     extra: [{ name: 'skip' }] },
+    { type: 'movie',  id: 'trakt-movies-recommended', name: 'Consigliati',   extra: [{ name: 'skip' }] },
+    { type: 'series', id: 'trakt-series-recommended', name: 'Consigliati',   extra: [{ name: 'skip' }] },
+    { type: 'movie',  id: 'trakt-movies-random',      name: 'Scegli per me', extra: [{ name: 'skip' }] },
+    { type: 'series', id: 'trakt-series-random',      name: 'Scegli per me', extra: [{ name: 'skip' }] }
   ],
   idPrefixes: ['tt', 'tmdb:'],
   logo: ADDON_URL + '/logo.png',
@@ -447,7 +449,10 @@ async function buildCatalog(type) {
     } else {
       const aired = airedByImdb.get(obj.ids.imdb) || airedByTmdb.get(obj.ids.tmdb) || 0;
       const seen = (w.seasons || []).reduce((tot, s) => tot + s.episodes.length, 0);
-      if (aired > 0 && seen >= aired) {
+      const seasonsWatched = (w.seasons || []).filter(s => s.number > 0);
+      // Completa se: episodi visti >= andati in onda, OPPURE aired sconosciuto ma ha visto stagioni intere
+      const isComplete = (aired > 0 && seen >= aired) || (aired === 0 && seasonsWatched.length > 0 && seen >= 6);
+      if (isComplete) {
         if (obj.ids.imdb) watchedImdb.add(obj.ids.imdb);
         if (obj.ids.tmdb) watchedTmdb.add(obj.ids.tmdb);
       }
@@ -456,7 +461,7 @@ async function buildCatalog(type) {
 
   items.sort((a, b) => new Date(b.listed_at) - new Date(a.listed_at));
 
-  const validObjs = items.slice(0, 300)
+  const validObjs = items
     .filter(item => {
       const obj = item.movie || item.show;
       if (!obj || !obj.ids || !(obj.ids.imdb || obj.ids.tmdb)) return false;
@@ -566,9 +571,21 @@ function prefetchMeta(metas, stremioType) {
   })();
 }
 
+function buildRandom(type) {
+  const sourceCatalogId = type === 'movie' ? 'trakt-movies' : 'trakt-series';
+  const source = cache[sourceCatalogId]?.metas || [];
+  if (!source.length) return [];
+  const shuffled = [...source].sort(() => Math.random() - 0.5);
+  return shuffled.slice(0, 36);
+}
+
 async function getCatalogCached(catalogId, type) {
   const entry = cache[catalogId];
   const isRecommended = catalogId.includes('recommended');
+  const isRandom = catalogId.includes('random');
+
+  // Random: nessuna cache, shuffle ad ogni apertura
+  if (isRandom) return buildRandom(type);
 
   if (entry && (Date.now() - entry.ts) < CACHE_TTL) return entry.metas;
 
