@@ -17,7 +17,7 @@ const META_CACHE_VERSION = 2; // incrementa quando cambia il formato del meta
 
 const manifest = {
   id: 'it.samuele.trakt.watchlist',
-  version: '1.1.3',
+  version: '1.1.4',
   name: 'Trakt Watchlist',
   description: 'Film e serie dalla tua watchlist Trakt',
   resources: ['catalog', 'meta'],
@@ -268,7 +268,14 @@ async function getTraktImages(imdbId, traktType) {
     });
     if (!res.ok) return null;
     const data = await res.json();
-    return data.images || null;
+    const imgs = data.images || {};
+    // Trakt restituisce array di URL senza https://, in qualità medium → convertiamo a full
+    const toUrl = arr => {
+      const raw = Array.isArray(arr) ? arr[0] : arr?.full;
+      if (!raw) return null;
+      return 'https://' + raw.replace('/medium/', '/full/');
+    };
+    return { poster: toUrl(imgs.poster), fanart: toUrl(imgs.fanart) };
   } catch (e) { return null; }
 }
 
@@ -345,8 +352,8 @@ async function enrichWithTMDB(imdbId, traktType, tmdbId) {
     // Fallback Trakt extended=images se TMDB non ha grafiche
     if ((!poster_path || !backdrop_path) && imdbId) {
       const ti = await getTraktImages(imdbId, traktType);
-      if (!poster_path   && ti?.poster?.full)  poster_path   = ti.poster.full;
-      if (!backdrop_path && ti?.fanart?.full)  backdrop_path = ti.fanart.full;
+      if (!poster_path   && ti?.poster)  poster_path   = ti.poster;
+      if (!backdrop_path && ti?.fanart)  backdrop_path = ti.fanart;
     }
     return {
       title: localizedTitle(it, en),
@@ -411,8 +418,8 @@ async function buildMeta(type, stremioId) {
   if ((!posterFallback || !backdropFallback) && imdbIdForTrakt) {
     const traktType2 = type === 'movie' ? 'movies' : 'shows';
     const ti = await getTraktImages(imdbIdForTrakt, traktType2);
-    if (!posterFallback   && ti?.poster?.full)  posterFallback   = ti.poster.full;
-    if (!backdropFallback && ti?.fanart?.full)  backdropFallback = ti.fanart.full;
+    if (!posterFallback   && ti?.poster)  posterFallback   = ti.poster;
+    if (!backdropFallback && ti?.fanart)  backdropFallback = ti.fanart;
   }
 
   // Trailer: preferisce italiano, poi inglese — solo YouTube, tipo Trailer ufficiale
