@@ -16,7 +16,7 @@ const META_CACHE_TTL = 24 * 60 * 60 * 1000; // 24 ore
 
 const manifest = {
   id: 'it.samuele.trakt.watchlist',
-  version: '1.0.33',
+  version: '1.0.34',
   name: 'Trakt Watchlist',
   description: 'Film e serie dalla tua watchlist Trakt',
   resources: ['catalog', 'meta'],
@@ -377,14 +377,13 @@ async function buildMeta(type, stremioId) {
 
   return {
     id: stremioId, type,
-    name:        it?.title || it?.name || en?.title || en?.name,
+    name:        localizedTitle(it, en),
     poster:      posterUrl(bestPosterPath(it?.images, base.poster_path)),
     background:  backdropUrl(bestBackdropPath(it?.images, base.backdrop_path)),
     description: overview,
     genres:      (it?.genres || en?.genres || []).map(g => g.name),
     imdbRating:  base.vote_average ? String(base.vote_average.toFixed(1)) : undefined,
-    year, cast, director, runtime, trailers,
-    name:        localizedTitle(it, en)
+    year, cast, director, runtime, trailers
   };
 }
 
