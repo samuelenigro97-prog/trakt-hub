@@ -18,7 +18,7 @@ const META_CACHE_VERSION = 4; // incrementa quando cambia il formato del meta
 
 const manifest = {
   id: 'it.samuele.trakt.watchlist',
-  version: '1.2.0',
+  version: '1.2.1',
   name: 'Trakt Watchlist',
   description: 'Film e serie dalla tua watchlist Trakt',
   resources: ['catalog', 'meta'],
@@ -507,6 +507,16 @@ async function buildMeta(type, stremioId) {
     ? posterUrl(seasonPosterPath)
     : posterUrl(posterFallback);
 
+  // Link azioni Trakt
+  const traktActionType = type === 'movie' ? 'movies' : 'shows';
+  const inWatchlist = (() => {
+    const catalogId = type === 'movie' ? 'trakt-movies' : 'trakt-series';
+    return !!(cache[catalogId]?.metas?.find(m => m.id === stremioId));
+  })();
+  const links = inWatchlist
+    ? [{ name: 'Rimuovi dalla Watchlist', category: 'Trakt', url: ADDON_URL + '/trakt/remove/' + traktActionType + '/' + stremioId }]
+    : [{ name: 'Aggiungi alla Watchlist', category: 'Trakt', url: ADDON_URL + '/trakt/add/' + traktActionType + '/' + stremioId }];
+
   return {
     id: stremioId, type,
     name:        localizedTitle(it, en),
@@ -515,7 +525,7 @@ async function buildMeta(type, stremioId) {
     description: overview,
     genres:      (it?.genres || en?.genres || []).map(g => g.name),
     imdbRating:  base.vote_average ? String(base.vote_average.toFixed(1)) : undefined,
-    year, cast, director, runtime, trailers,
+    year, cast, director, runtime, trailers, links,
     ...(videos.length ? { videos } : {})
   };
 }
@@ -851,6 +861,67 @@ async function main() {
 
   const app = express();
   app.get('/logo.png', (req, res) => res.sendFile(path.join(__dirname, 'logo.png')));
+
+  const traktAction = async (action, traktType, stremioId) => {
+    const imdbId = stremioId.startsWith('tt') ? stremioId : null;
+    const tmdbId = stremioId.startsWith('tmdb:') ? stremioId.replace('tmdb:', '') : null;
+    const ids = imdbId ? { imdb: imdbId } : { tmdb: parseInt(tmdbId) };
+    const body = traktType === 'movies' ? { movies: [{ ids }] } : { shows: [{ ids }] };
+    const res = await fetch('https://api.trakt.tv/sync/watchlist' + (action === 'remove' ? '/remove' : ''), {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'trakt-api-version': '2',
+        'trakt-api-key': TRAKT_CLIENT_ID,
+        'Authorization': 'Bearer ' + accessToken
+      },
+      body: JSON.stringify(body)
+    });
+    return res.ok;
+  };
+
+  const htmlPage = (title, message, color) => `<!DOCTYPE html>
+<html lang="it"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>${title}</title>
+<style>body{font-family:system-ui,sans-serif;background:#1a1a2e;color:#eee;display:flex;align-items:center;justify-content:center;height:100vh;margin:0}
+.box{text-align:center;padding:2rem;background:#16213e;border-radius:1rem;border:2px solid ${color};max-width:400px}
+h1{color:${color};margin-bottom:.5rem}p{color:#aaa;margin-top:.5rem}
+a{color:${color};text-decoration:none;font-size:.9rem}</style></head>
+<body><div class="box"><h1>${title}</h1><p>${message}</p></div></body></html>`;
+
+  app.get('/trakt/add/:type/:id', async (req, res) => {
+    try {
+      const ok = await traktAction('add', req.params.type, req.params.id);
+      if (ok) {
+        // Invalida il catalogo così la prossima apertura lo include
+        delete cache['trakt-' + (req.params.type === 'movies' ? 'movies' : 'series')];
+        console.log('[watchlist] Aggiunto:', req.params.id);
+        res.send(htmlPage('✅ Aggiunto!', 'Il titolo è stato aggiunto alla tua Watchlist Trakt.<br>Chiudi questa pagina e aggiorna Stremio.', '#4ade80'));
+      } else {
+        res.status(500).send(htmlPage('❌ Errore', 'Non è stato possibile aggiungere il titolo. Riprova.', '#f87171'));
+      }
+    } catch (e) {
+      res.status(500).send(htmlPage('❌ Errore', e.message, '#f87171'));
+    }
+  });
+
+  app.get('/trakt/remove/:type/:id', async (req, res) => {
+    try {
+      const ok = await traktAction('remove', req.params.type, req.params.id);
+      if (ok) {
+        delete cache['trakt-' + (req.params.type === 'movies' ? 'movies' : 'series')];
+        // Rimuovi anche dalla meta cache
+        const metaType = req.params.type === 'movies' ? 'movie' : 'series';
+        delete metaCache[metaType + ':' + req.params.id];
+        console.log('[watchlist] Rimosso:', req.params.id);
+        res.send(htmlPage('🗑️ Rimosso!', 'Il titolo è stato rimosso dalla tua Watchlist Trakt.<br>Chiudi questa pagina e aggiorna Stremio.', '#fb923c'));
+      } else {
+        res.status(500).send(htmlPage('❌ Errore', 'Non è stato possibile rimuovere il titolo. Riprova.', '#f87171'));
+      }
+    } catch (e) {
+      res.status(500).send(htmlPage('❌ Errore', e.message, '#f87171'));
+    }
+  });
 
   app.get('/clear-cache/:token', (req, res) => {
     if (req.params.token !== CLEAR_CACHE_TOKEN) return res.status(403).json({ error: 'Non autorizzato' });
