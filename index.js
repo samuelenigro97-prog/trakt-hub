@@ -17,7 +17,7 @@ const META_CACHE_VERSION = 2; // incrementa quando cambia il formato del meta
 
 const manifest = {
   id: 'it.samuele.trakt.watchlist',
-  version: '1.0.42',
+  version: '1.1.0',
   name: 'Trakt Watchlist',
   description: 'Film e serie dalla tua watchlist Trakt',
   resources: ['catalog', 'meta'],
@@ -331,25 +331,33 @@ async function enrichWithTMDB(imdbId, traktType, tmdbId) {
   } catch (e) { return null; }
 }
 
+function tmdbFetch(url, timeoutMs = 10000) {
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), timeoutMs);
+  return fetch(url, { signal: ctrl.signal })
+    .then(r => { clearTimeout(t); return r; })
+    .catch(e => { clearTimeout(t); return null; });
+}
+
 async function buildMeta(type, stremioId) {
   const tmdbType = type === 'movie' ? 'movie' : 'tv';
   let tmdbId;
   if (stremioId.startsWith('tmdb:')) {
     tmdbId = stremioId.replace('tmdb:', '');
   } else {
-    const res = await fetch('https://api.themoviedb.org/3/find/' + stremioId + '?external_source=imdb_id&api_key=' + TMDB_KEY);
-    if (!res.ok) return null;
+    const res = await tmdbFetch('https://api.themoviedb.org/3/find/' + stremioId + '?external_source=imdb_id&api_key=' + TMDB_KEY);
+    if (!res?.ok) return null;
     const data = await res.json();
     const results = tmdbType === 'movie' ? data.movie_results : data.tv_results;
     if (!results || !results[0]) return null;
     tmdbId = results[0].id;
   }
   const [itRes, enRes] = await Promise.all([
-    fetch('https://api.themoviedb.org/3/' + tmdbType + '/' + tmdbId + '?language=it-IT&append_to_response=credits,images,videos&include_image_language=it,en,null&api_key=' + TMDB_KEY),
-    fetch('https://api.themoviedb.org/3/' + tmdbType + '/' + tmdbId + '?language=en-US&append_to_response=credits,videos&api_key=' + TMDB_KEY)
+    tmdbFetch('https://api.themoviedb.org/3/' + tmdbType + '/' + tmdbId + '?language=it-IT&append_to_response=credits,images,videos&include_image_language=it,en,null&api_key=' + TMDB_KEY),
+    tmdbFetch('https://api.themoviedb.org/3/' + tmdbType + '/' + tmdbId + '?language=en-US&append_to_response=credits,videos&api_key=' + TMDB_KEY)
   ]);
-  const it = itRes.ok ? await itRes.json() : null;
-  const en = enRes.ok ? await enRes.json() : null;
+  const it = (itRes?.ok) ? await itRes.json() : null;
+  const en = (enRes?.ok) ? await enRes.json() : null;
   if (!it && !en) return null;
   const base = it || en;
   const itOverview = it?.overview?.trim() || '';
@@ -676,7 +684,9 @@ function prefetchMeta(metas, stremioType) {
     return !entry || entry.v !== META_CACHE_VERSION || (Date.now() - entry.ts) >= META_CACHE_TTL;
   });
   (async () => {
-    const BATCH = 10;
+    // Batch più piccolo per le serie (ogni serie fa più chiamate TMDB)
+    const BATCH = stremioType === 'series' ? 3 : 10;
+    const PAUSE = stremioType === 'series' ? 1000 : 200;
     for (let i = 0; i < toFetch.length; i += BATCH) {
       await Promise.all(toFetch.slice(i, i + BATCH).map(async meta => {
         const key = stremioType + ':' + meta.id;
@@ -685,7 +695,7 @@ function prefetchMeta(metas, stremioType) {
           if (m) metaCache[key] = { meta: m, ts: Date.now(), v: META_CACHE_VERSION };
         } catch (e) {}
       }));
-      if (i + BATCH < toFetch.length) await new Promise(r => setTimeout(r, 200));
+      if (i + BATCH < toFetch.length) await new Promise(r => setTimeout(r, PAUSE));
     }
     saveCacheToDisk();
     console.log('[meta-prefetch] ' + stremioType + ': ' + toFetch.length + ' titoli pre-caricati');
