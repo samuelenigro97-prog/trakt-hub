@@ -16,13 +16,10 @@ const META_CACHE_TTL = 24 * 60 * 60 * 1000; // 24 ore
 
 const manifest = {
   id: 'it.samuele.trakt.watchlist',
-  version: '1.0.36',
+  version: '1.0.37',
   name: 'Trakt Watchlist',
   description: 'Film e serie dalla tua watchlist Trakt',
-  resources: [
-    'catalog',
-    { name: 'meta', types: ['movie'], idPrefixes: ['tt', 'tmdb:'] }
-  ],
+  resources: ['catalog', 'meta'],
   types: ['movie', 'series'],
   catalogs: [
     { type: 'movie',  id: 'trakt-movies',        name: 'Da vedere',     extra: [{ name: 'skip' }] },
@@ -379,6 +376,34 @@ async function buildMeta(type, stremioId) {
   const trailerKey = pickTrailer(it?.videos) || pickTrailer(en?.videos);
   const trailers = trailerKey ? [{ source: trailerKey, type: 'Trailer' }] : [];
 
+  // Episodi per le serie (necessari per il selettore puntate in Stremio)
+  let videos = [];
+  if (type === 'series') {
+    const seasonList = (base.seasons || []).filter(s => s.season_number > 0);
+    const SEASON_BATCH = 5;
+    for (let i = 0; i < seasonList.length; i += SEASON_BATCH) {
+      const batch = seasonList.slice(i, i + SEASON_BATCH);
+      const results = await Promise.all(batch.map(s =>
+        fetch('https://api.themoviedb.org/3/tv/' + tmdbId + '/season/' + s.season_number + '?language=it-IT&api_key=' + TMDB_KEY)
+          .then(r => r.ok ? r.json() : null).catch(() => null)
+      ));
+      for (const season of results) {
+        if (!season) continue;
+        for (const ep of season.episodes || []) {
+          videos.push({
+            id:       stremioId + ':' + season.season_number + ':' + ep.episode_number,
+            title:    ep.name || ('Episodio ' + ep.episode_number),
+            season:   season.season_number,
+            episode:  ep.episode_number,
+            released: ep.air_date ? new Date(ep.air_date).toISOString() : undefined,
+            thumbnail: ep.still_path ? 'https://image.tmdb.org/t/p/w300' + ep.still_path : undefined,
+            overview: ep.overview || undefined
+          });
+        }
+      }
+    }
+  }
+
   return {
     id: stremioId, type,
     name:        localizedTitle(it, en),
@@ -387,7 +412,8 @@ async function buildMeta(type, stremioId) {
     description: overview,
     genres:      (it?.genres || en?.genres || []).map(g => g.name),
     imdbRating:  base.vote_average ? String(base.vote_average.toFixed(1)) : undefined,
-    year, cast, director, runtime, trailers
+    year, cast, director, runtime, trailers,
+    ...(videos.length ? { videos } : {})
   };
 }
 
@@ -729,8 +755,6 @@ async function main() {
   });
 
   builder.defineMetaHandler(async ({ type, id }) => {
-    // Solo film: le serie le gestisce Cinemeta che ha la lista episodi completa
-    if (type !== 'movie') return { meta: null };
     try {
       const key = type + ':' + id;
       const entry = metaCache[key];
