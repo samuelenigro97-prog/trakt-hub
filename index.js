@@ -18,7 +18,7 @@ const META_CACHE_VERSION = 4; // incrementa quando cambia il formato del meta
 
 const manifest = {
   id: 'it.samuele.trakt.watchlist',
-  version: '1.2.5',
+  version: '1.2.6',
   name: 'Trakt Watchlist',
   description: 'Film e serie dalla tua watchlist Trakt',
   resources: ['catalog', 'meta', 'stream'],
@@ -545,10 +545,11 @@ async function buildMeta(type, stremioId) {
 
 function metaFromTmdb(tmdb, obj, type) {
   const stremioId = obj.ids.imdb || ('tmdb:' + obj.ids.tmdb);
+  const cachedName = metaCache[type + ':' + stremioId]?.meta?.name;
   return {
     id: stremioId, type,
     tmdbId:      String(obj.ids.tmdb || ''),
-    name:        (tmdb && tmdb.title) || obj.title,
+    name:        (tmdb && tmdb.title) || cachedName || obj.title,
     poster:      posterUrl(tmdb?.poster_path),
     background:  backdropUrl(tmdb?.backdrop_path),
     description: tmdb?.overview || '',
