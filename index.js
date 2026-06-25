@@ -18,7 +18,7 @@ const META_CACHE_VERSION = 4; // incrementa quando cambia il formato del meta
 
 const manifest = {
   id: 'it.samuele.trakt.watchlist',
-  version: '1.2.2',
+  version: '1.2.3',
   name: 'Trakt Watchlist',
   description: 'Film e serie dalla tua watchlist Trakt',
   resources: ['catalog', 'meta'],
@@ -870,17 +870,23 @@ async function main() {
     const tmdbId = stremioId.startsWith('tmdb:') ? stremioId.replace('tmdb:', '') : null;
     const ids = imdbId ? { imdb: imdbId } : { tmdb: parseInt(tmdbId) };
     const body = traktType === 'movies' ? { movies: [{ ids }] } : { shows: [{ ids }] };
-    const res = await fetch('https://api.trakt.tv/sync/watchlist' + (action === 'remove' ? '/remove' : ''), {
+    const endpoint = 'https://api.trakt.tv/sync/watchlist' + (action === 'remove' ? '/remove' : '');
+    const res = await fetch(endpoint, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'trakt-api-version': '2',
         'trakt-api-key': TRAKT_CLIENT_ID,
-        'Authorization': 'Bearer ' + accessToken
+        'Authorization': 'Bearer ' + accessToken,
+        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
       },
       body: JSON.stringify(body)
     });
-    return res.ok;
+    if (!res.ok) {
+      const text = await res.text().catch(() => '');
+      console.error('[traktAction] ' + action + ' failed:', res.status, text.slice(0, 200));
+    }
+    return { ok: res.ok, status: res.status };
   };
 
   const htmlPage = (title, message, color) => `<!DOCTYPE html>
@@ -894,14 +900,13 @@ a{color:${color};text-decoration:none;font-size:.9rem}</style></head>
 
   app.get('/trakt/add/:type/:id', async (req, res) => {
     try {
-      const ok = await traktAction('add', req.params.type, req.params.id);
+      const { ok, status } = await traktAction('add', req.params.type, req.params.id);
       if (ok) {
-        // Invalida il catalogo così la prossima apertura lo include
         delete cache['trakt-' + (req.params.type === 'movies' ? 'movies' : 'series')];
         console.log('[watchlist] Aggiunto:', req.params.id);
         res.send(htmlPage('✅ Aggiunto!', 'Il titolo è stato aggiunto alla tua Watchlist Trakt.<br>Chiudi questa pagina e aggiorna Stremio.', '#4ade80'));
       } else {
-        res.status(500).send(htmlPage('❌ Errore', 'Non è stato possibile aggiungere il titolo. Riprova.', '#f87171'));
+        res.status(500).send(htmlPage('❌ Errore', 'Trakt ha risposto ' + status + '. Riprova.', '#f87171'));
       }
     } catch (e) {
       res.status(500).send(htmlPage('❌ Errore', e.message, '#f87171'));
@@ -910,16 +915,15 @@ a{color:${color};text-decoration:none;font-size:.9rem}</style></head>
 
   app.get('/trakt/remove/:type/:id', async (req, res) => {
     try {
-      const ok = await traktAction('remove', req.params.type, req.params.id);
+      const { ok, status } = await traktAction('remove', req.params.type, req.params.id);
       if (ok) {
         delete cache['trakt-' + (req.params.type === 'movies' ? 'movies' : 'series')];
-        // Rimuovi anche dalla meta cache
         const metaType = req.params.type === 'movies' ? 'movie' : 'series';
         delete metaCache[metaType + ':' + req.params.id];
         console.log('[watchlist] Rimosso:', req.params.id);
         res.send(htmlPage('🗑️ Rimosso!', 'Il titolo è stato rimosso dalla tua Watchlist Trakt.<br>Chiudi questa pagina e aggiorna Stremio.', '#fb923c'));
       } else {
-        res.status(500).send(htmlPage('❌ Errore', 'Non è stato possibile rimuovere il titolo. Riprova.', '#f87171'));
+        res.status(500).send(htmlPage('❌ Errore', 'Trakt ha risposto ' + status + '. Riprova.', '#f87171'));
       }
     } catch (e) {
       res.status(500).send(htmlPage('❌ Errore', e.message, '#f87171'));
@@ -941,7 +945,8 @@ a{color:${color};text-decoration:none;font-size:.9rem}</style></head>
           'Content-Type': 'application/json',
           'trakt-api-version': '2',
           'trakt-api-key': TRAKT_CLIENT_ID,
-          'Authorization': 'Bearer ' + accessToken
+          'Authorization': 'Bearer ' + accessToken,
+          'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
         },
         body: JSON.stringify(body)
       });
