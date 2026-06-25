@@ -18,7 +18,7 @@ const META_CACHE_VERSION = 4; // incrementa quando cambia il formato del meta
 
 const manifest = {
   id: 'it.samuele.trakt.watchlist',
-  version: '1.2.6',
+  version: '1.2.7',
   name: 'Trakt Watchlist',
   description: 'Film e serie dalla tua watchlist Trakt',
   resources: ['catalog', 'meta', 'stream'],
@@ -34,8 +34,16 @@ const manifest = {
         { name: 'genre', options: ['Azione & Avventura','Animazione','Commedia','Crime','Documentario','Dramma','Fantascienza & Fantasy','Horror','Mistero','Reality','Thriller','Western'], isRequired: false }
       ]
     },
-    { type: 'movie',  id: 'trakt-movies-random', name: 'Scegli per me', extra: [{ name: 'skip' }] },
-    { type: 'series', id: 'trakt-series-random', name: 'Scegli per me', extra: [{ name: 'skip' }] }
+    { type: 'movie',  id: 'trakt-movies-random', name: 'Scegli per me', extra: [
+        { name: 'skip' },
+        { name: 'genre', options: ['Azione','Avventura','Animazione','Commedia','Crime','Documentario','Dramma','Fantasy','Horror','Mistero','Romantico','Fantascienza','Thriller','Guerra','Western'], isRequired: false }
+      ]
+    },
+    { type: 'series', id: 'trakt-series-random', name: 'Scegli per me', extra: [
+        { name: 'skip' },
+        { name: 'genre', options: ['Azione & Avventura','Animazione','Commedia','Crime','Documentario','Dramma','Fantascienza & Fantasy','Horror','Mistero','Reality','Thriller','Western'], isRequired: false }
+      ]
+    }
   ],
   idPrefixes: ['tt', 'tmdb:'],
   logo: ADDON_URL + '/logo.png',
@@ -767,23 +775,23 @@ function prefetchMeta(metas, stremioType) {
   })();
 }
 
-async function buildRandom(type) {
+async function buildRandom(type, genre) {
   const sourceCatalogId = type === 'movie' ? 'trakt-movies' : 'trakt-series';
-  // Assicurati che il catalogo Da vedere sia in cache
   if (!cache[sourceCatalogId]) await getCatalogCached(sourceCatalogId, type);
-  const source = cache[sourceCatalogId]?.metas || [];
+  let source = cache[sourceCatalogId]?.metas || [];
+  if (genre) source = source.filter(m => m.genres && m.genres.includes(genre));
   if (!source.length) return [];
   const shuffled = [...source].sort(() => Math.random() - 0.5);
   return shuffled.slice(0, 36);
 }
 
-async function getCatalogCached(catalogId, type) {
+async function getCatalogCached(catalogId, type, genre) {
   const entry = cache[catalogId];
   const isRecommended = catalogId.includes('recommended');
   const isRandom = catalogId.includes('random');
 
   // Random: nessuna cache, shuffle ad ogni apertura
-  if (isRandom) return await buildRandom(type);
+  if (isRandom) return await buildRandom(type, genre);
 
   if (entry && (Date.now() - entry.ts) < CACHE_TTL) return entry.metas;
 
@@ -847,8 +855,8 @@ async function main() {
     try {
       const skip = parseInt(extra?.skip || 0);
       const genre = extra?.genre || null;
-      let allMetas = await getCatalogCached(id, type);
-      if (genre) allMetas = allMetas.filter(m => m.genres && m.genres.includes(genre));
+      let allMetas = await getCatalogCached(id, type, genre);
+      if (genre && !id.includes('random')) allMetas = allMetas.filter(m => m.genres && m.genres.includes(genre));
       const metas = allMetas.slice(skip, skip + 100);
       return { metas };
     } catch (e) {
