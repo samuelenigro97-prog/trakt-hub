@@ -16,16 +16,16 @@ const META_CACHE_TTL = 24 * 60 * 60 * 1000; // 24 ore
 
 const manifest = {
   id: 'it.samuele.trakt.watchlist',
-  version: '1.0.27',
+  version: '1.0.28',
   name: 'Trakt Watchlist',
   description: 'Film e serie dalla tua watchlist Trakt',
   resources: ['catalog', 'meta'],
   types: ['movie', 'series'],
   catalogs: [
-    { type: 'movie',  id: 'trakt-movies',             name: 'Da vedere' },
-    { type: 'series', id: 'trakt-series',             name: 'Da vedere' },
-    { type: 'movie',  id: 'trakt-movies-recommended', name: 'Consigliati' },
-    { type: 'series', id: 'trakt-series-recommended', name: 'Consigliati' }
+    { type: 'movie',  id: 'trakt-movies',             name: 'Da vedere',   extra: [{ name: 'skip' }] },
+    { type: 'series', id: 'trakt-series',             name: 'Da vedere',   extra: [{ name: 'skip' }] },
+    { type: 'movie',  id: 'trakt-movies-recommended', name: 'Consigliati', extra: [{ name: 'skip' }] },
+    { type: 'series', id: 'trakt-series-recommended', name: 'Consigliati', extra: [{ name: 'skip' }] }
   ],
   idPrefixes: ['tt', 'tmdb:'],
   logo: ADDON_URL + '/logo.png',
@@ -614,9 +614,11 @@ async function main() {
 
   const builder = new addonBuilder(manifest);
 
-  builder.defineCatalogHandler(async ({ type, id }) => {
+  builder.defineCatalogHandler(async ({ type, id, extra }) => {
     try {
-      const metas = await getCatalogCached(id, type);
+      const skip = parseInt(extra?.skip || 0);
+      const allMetas = await getCatalogCached(id, type);
+      const metas = allMetas.slice(skip, skip + 100);
       return { metas };
     } catch (e) {
       console.error('Errore catalogo:', e.message);
