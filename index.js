@@ -16,7 +16,7 @@ const META_CACHE_TTL = 24 * 60 * 60 * 1000; // 24 ore
 
 const manifest = {
   id: 'it.samuele.trakt.watchlist',
-  version: '1.0.30',
+  version: '1.0.31',
   name: 'Trakt Watchlist',
   description: 'Film e serie dalla tua watchlist Trakt',
   resources: ['catalog', 'meta'],
@@ -46,6 +46,11 @@ const etags = {};
 
 // Cache traduzioni
 const translationCache = new Map();
+
+// Auto-cleanup: rimuove dalla history Trakt i titoli in watchlist
+const watchedCache = {};
+const lastCleanupTs = {};
+const CLEANUP_INTERVAL = 60 * 60 * 1000; // 1 ora
 
 function clearCache() {
   Object.keys(cache).forEach(k => delete cache[k]);
@@ -227,8 +232,6 @@ async function getTraktWatchlist(type) {
   }
   return items;
 }
-
-const watchedCache = {};
 
 async function getTraktWatched(type) {
   try {
@@ -418,6 +421,41 @@ async function enrichBatch(items, traktType, type) {
   return metas;
 }
 
+async function autoCleanupWatched(type, watchlistItems, watchedImdb, watchedTmdb) {
+  const now = Date.now();
+  if (lastCleanupTs[type] && (now - lastCleanupTs[type]) < CLEANUP_INTERVAL) return;
+  lastCleanupTs[type] = now;
+
+  const toRemove = watchlistItems
+    .map(item => item.movie || item.show)
+    .filter(obj => obj && (
+      (obj.ids.imdb && watchedImdb.has(obj.ids.imdb)) ||
+      (obj.ids.tmdb && watchedTmdb.has(String(obj.ids.tmdb)))
+    ));
+
+  if (!toRemove.length) return;
+  console.log('[auto-cleanup] rimuovo ' + toRemove.length + ' titoli dalla history (' + type + ')');
+
+  const payload = type === 'movie'
+    ? { movies: toRemove.map(o => ({ ids: o.ids })) }
+    : { shows:  toRemove.map(o => ({ ids: o.ids })) };
+
+  try {
+    const res = await fetch('https://api.trakt.tv/sync/history/remove', {
+      method: 'POST',
+      headers: { ...traktHeaders(), 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    const result = await res.json();
+    const d = result.deleted || {};
+    console.log('[auto-cleanup] rimossi: ' + (d.movies || 0) + ' film, ' + (d.episodes || 0) + ' episodi');
+    // Svuota watchedCache così al prossimo giro il filtro è aggiornato
+    delete watchedCache[type === 'movie' ? 'movies' : 'shows'];
+  } catch (e) {
+    console.warn('[auto-cleanup] errore:', e.message);
+  }
+}
+
 async function buildCatalog(type) {
   const traktType = type === 'movie' ? 'movies' : 'shows';
   const [items, watched] = await Promise.all([
@@ -458,6 +496,9 @@ async function buildCatalog(type) {
       }
     }
   }
+
+  // Auto-cleanup in background (max 1 volta/ora)
+  autoCleanupWatched(type, items, watchedImdb, watchedTmdb);
 
   items.sort((a, b) => new Date(b.listed_at) - new Date(a.listed_at));
 
