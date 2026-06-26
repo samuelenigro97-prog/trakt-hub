@@ -1061,6 +1061,10 @@ a{color:${color};text-decoration:none;font-size:.9rem}</style></head>
     res.json({ ok: true, rimossi: { catalog: catalogCount, meta: metaCount } });
   });
 
+  app.use((req, res, next) => {
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    next();
+  });
   app.use(getRouter(builder.getInterface()));
 
   app.listen(PORT, () => {
