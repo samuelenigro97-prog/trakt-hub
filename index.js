@@ -18,7 +18,7 @@ const META_CACHE_VERSION = 4; // incrementa quando cambia il formato del meta
 
 const manifest = {
   id: 'it.samuele.trakt.watchlist',
-  version: '1.4.0',
+  version: '1.4.1',
   name: 'Trakt Hub',
   description: 'La tua watchlist Trakt: Da vedere, Scegli per me, aggiungi e segna come visto direttamente da Stremio.',
   resources: ['catalog', 'stream'],
@@ -308,6 +308,19 @@ function bestPosterPath(images, fallback) {
   return [...posters].sort((a, b) => prio(a) - prio(b) || (b.vote_average || 0) - (a.vote_average || 0))[0]?.file_path || fallback;
 }
 
+// Data di uscita localizzata: preferisce IT, poi US, poi globale (solo film; serie usa first_air_date)
+function bestReleaseDate(tmdbData, tmdbType) {
+  if (tmdbType === 'tv') return tmdbData?.first_air_date || null;
+  const results = tmdbData?.release_dates?.results || [];
+  for (const country of ['IT', 'US']) {
+    const entry = results.find(r => r.iso_3166_1 === country);
+    if (!entry) continue;
+    const theatrical = entry.release_dates.find(r => r.type === 3 || r.type === 2);
+    if (theatrical?.release_date) return theatrical.release_date.slice(0, 10);
+  }
+  return tmdbData?.release_date || null;
+}
+
 // Sceglie il backdrop migliore: neutro > inglese > italiano (i backdrop neutri sono i migliori)
 function bestBackdropPath(images, fallback) {
   const backdrops = images?.backdrops || [];
@@ -347,8 +360,9 @@ async function enrichWithTMDB(imdbId, traktType, tmdbId) {
       }
     }
     if (!id) return null;
+    const appendIt = tmdbType === 'movie' ? 'images,release_dates' : 'images';
     const [itRes, enRes] = await Promise.all([
-      fetch('https://api.themoviedb.org/3/' + tmdbType + '/' + id + '?language=it-IT&append_to_response=images&include_image_language=it,en,null&api_key=' + TMDB_KEY),
+      fetch('https://api.themoviedb.org/3/' + tmdbType + '/' + id + '?language=it-IT&append_to_response=' + appendIt + '&include_image_language=it,en,null&api_key=' + TMDB_KEY),
       fetch('https://api.themoviedb.org/3/' + tmdbType + '/' + id + '?language=en-US&api_key=' + TMDB_KEY)
     ]);
     const it = itRes.ok ? await itRes.json() : null;
@@ -368,7 +382,7 @@ async function enrichWithTMDB(imdbId, traktType, tmdbId) {
       poster_path, backdrop_path,
       genres:       (it?.genres || en?.genres || []).map(g => g.name),
       vote_average: (it || en)?.vote_average,
-      release_date: (it || en)?.release_date || (it || en)?.first_air_date || null
+      release_date: bestReleaseDate(it, tmdbType)
     };
   } catch (e) { return null; }
 }
@@ -545,13 +559,18 @@ function metaFromTmdb(tmdb, obj, type) {
   const cachedName = metaCache[type + ':' + stremioId]?.meta?.name;
   const releaseDate = tmdb?.release_date || null;
   const upcoming = releaseDate ? new Date(releaseDate) > new Date() : false;
+  let description = tmdb?.overview || '';
+  if (upcoming && releaseDate) {
+    const formatted = new Date(releaseDate).toLocaleDateString('it-IT', { day: 'numeric', month: 'long', year: 'numeric' });
+    description = (description ? description + '\n\n' : '') + '📅 Uscita: ' + formatted;
+  }
   return {
     id: stremioId, type,
     tmdbId:      String(obj.ids.tmdb || ''),
     name:        (tmdb && tmdb.title) || cachedName || obj.title,
     poster:      posterUrl(tmdb?.poster_path),
     background:  backdropUrl(tmdb?.backdrop_path),
-    description: tmdb?.overview || '',
+    description,
     genres:      tmdb?.genres || [],
     imdbRating:  tmdb?.vote_average ? String(tmdb.vote_average.toFixed(1)) : undefined,
     year:        obj.year,
@@ -1048,6 +1067,25 @@ a{color:${color};text-decoration:none;font-size:.9rem}</style></head>
     } catch (e) {
       res.status(500).send(htmlPage('❌ Errore', e.message, '#f87171'));
     }
+  });
+
+  app.get('/refresh/:token', async (req, res) => {
+    if (req.params.token !== CLEAR_CACHE_TOKEN) return res.status(403).json({ error: 'Non autorizzato' });
+    delete cache['trakt-movies'];
+    delete cache['trakt-series'];
+    delete cache['trakt-movies-upcoming'];
+    delete cache['trakt-series-upcoming'];
+    setImmediate(async () => {
+      try {
+        for (const [id, type] of [['trakt-movies', 'movie'], ['trakt-series', 'series']]) {
+          const metas = await getCatalogCached(id, type);
+          prefetchMeta(metas, type === 'movie' ? 'movie' : 'series');
+        }
+        saveCacheToDisk();
+        console.log('[refresh] Cataloghi aggiornati manualmente');
+      } catch (e) { console.warn('[refresh] errore:', e.message); }
+    });
+    res.json({ ok: true, message: 'Refresh cataloghi avviato in background' });
   });
 
   app.get('/clear-cache/:token', (req, res) => {
