@@ -18,16 +18,18 @@ const META_CACHE_VERSION = 4; // incrementa quando cambia il formato del meta
 
 const manifest = {
   id: 'it.samuele.trakt.watchlist',
-  version: '1.3.7',
+  version: '1.4.0',
   name: 'Trakt Hub',
   description: 'La tua watchlist Trakt: Da vedere, Scegli per me, aggiungi e segna come visto direttamente da Stremio.',
   resources: ['catalog', 'stream'],
   types: ['movie', 'series'],
   catalogs: [
-    { type: 'movie',  id: 'trakt-movies',        name: 'Da vedere',     extra: [{ name: 'skip' }, { name: 'genre', options: ['Azione','Avventura','Animazione','Commedia','Crime','Documentario','Dramma','Fantasy','Horror','Mistero','Romantico','Fantascienza','Thriller','Guerra','Western'] }] },
-    { type: 'series', id: 'trakt-series',        name: 'Da vedere',     extra: [{ name: 'skip' }, { name: 'genre', options: ['Azione & Avventura','Animazione','Commedia','Crime','Documentario','Dramma','Fantascienza & Fantasy','Horror','Mistero','Reality','Thriller','Western'] }] },
-    { type: 'movie',  id: 'trakt-movies-random', name: 'Scegli per me', extra: [{ name: 'skip' }, { name: 'genre', options: ['Azione','Avventura','Animazione','Commedia','Crime','Documentario','Dramma','Fantasy','Horror','Mistero','Romantico','Fantascienza','Thriller','Guerra','Western'] }] },
-    { type: 'series', id: 'trakt-series-random', name: 'Scegli per me', extra: [{ name: 'skip' }, { name: 'genre', options: ['Azione & Avventura','Animazione','Commedia','Crime','Documentario','Dramma','Fantascienza & Fantasy','Horror','Mistero','Reality','Thriller','Western'] }] }
+    { type: 'movie',  id: 'trakt-movies',          name: 'Da vedere',     extra: [{ name: 'skip' }, { name: 'genre', options: ['Azione','Avventura','Animazione','Commedia','Crime','Documentario','Dramma','Fantasy','Horror','Mistero','Romantico','Fantascienza','Thriller','Guerra','Western'] }] },
+    { type: 'series', id: 'trakt-series',          name: 'Da vedere',     extra: [{ name: 'skip' }, { name: 'genre', options: ['Azione & Avventura','Animazione','Commedia','Crime','Documentario','Dramma','Fantascienza & Fantasy','Horror','Mistero','Reality','Thriller','Western'] }] },
+    { type: 'movie',  id: 'trakt-movies-random',   name: 'Scegli per me', extra: [{ name: 'skip' }, { name: 'genre', options: ['Azione','Avventura','Animazione','Commedia','Crime','Documentario','Dramma','Fantasy','Horror','Mistero','Romantico','Fantascienza','Thriller','Guerra','Western'] }] },
+    { type: 'series', id: 'trakt-series-random',   name: 'Scegli per me', extra: [{ name: 'skip' }, { name: 'genre', options: ['Azione & Avventura','Animazione','Commedia','Crime','Documentario','Dramma','Fantascienza & Fantasy','Horror','Mistero','Reality','Thriller','Western'] }] },
+    { type: 'movie',  id: 'trakt-movies-upcoming', name: 'In arrivo',     extra: [{ name: 'skip' }] },
+    { type: 'series', id: 'trakt-series-upcoming', name: 'In arrivo',     extra: [{ name: 'skip' }] }
   ],
   idPrefixes: ['tt', 'tmdb:'],
   logo: ADDON_URL + '/logo.png',
@@ -365,7 +367,8 @@ async function enrichWithTMDB(imdbId, traktType, tmdbId) {
       overview: it?.overview?.trim() || en?.overview?.trim() || '',
       poster_path, backdrop_path,
       genres:       (it?.genres || en?.genres || []).map(g => g.name),
-      vote_average: (it || en)?.vote_average
+      vote_average: (it || en)?.vote_average,
+      release_date: (it || en)?.release_date || (it || en)?.first_air_date || null
     };
   } catch (e) { return null; }
 }
@@ -540,6 +543,8 @@ async function buildMeta(type, stremioId) {
 function metaFromTmdb(tmdb, obj, type) {
   const stremioId = obj.ids.imdb || ('tmdb:' + obj.ids.tmdb);
   const cachedName = metaCache[type + ':' + stremioId]?.meta?.name;
+  const releaseDate = tmdb?.release_date || null;
+  const upcoming = releaseDate ? new Date(releaseDate) > new Date() : false;
   return {
     id: stremioId, type,
     tmdbId:      String(obj.ids.tmdb || ''),
@@ -549,7 +554,8 @@ function metaFromTmdb(tmdb, obj, type) {
     description: tmdb?.overview || '',
     genres:      tmdb?.genres || [],
     imdbRating:  tmdb?.vote_average ? String(tmdb.vote_average.toFixed(1)) : undefined,
-    year:        obj.year
+    year:        obj.year,
+    ...(upcoming ? { upcoming: true, releaseDate } : {})
   };
 }
 
@@ -658,7 +664,17 @@ async function buildCatalog(type) {
     })
     .map(item => item.movie || item.show);
 
-  return enrichBatch(validObjs, traktType, type);
+  const allMetas = await enrichBatch(validObjs, traktType, type);
+
+  const released = allMetas.filter(m => !m.upcoming);
+  const upcoming = allMetas
+    .filter(m => m.upcoming)
+    .sort((a, b) => new Date(a.releaseDate || 0) - new Date(b.releaseDate || 0));
+
+  const upcomingId = type === 'movie' ? 'trakt-movies-upcoming' : 'trakt-series-upcoming';
+  cache[upcomingId] = { metas: upcoming, ts: Date.now() };
+
+  return released;
 }
 
 async function buildRecommendations(type) {
@@ -793,28 +809,58 @@ async function buildRandom(type, genre, forHome = false) {
 }
 
 async function getCatalogCached(catalogId, type, genre) {
-  const entry = cache[catalogId];
   const isRecommended = catalogId.includes('recommended');
-  const isRandom = catalogId.includes('random');
+  const isRandom      = catalogId.includes('random');
+  const isUpcoming    = catalogId.includes('upcoming');
 
-  // Random: nessuna cache, shuffle ad ogni apertura
-  if (isRandom) return await buildRandom(type, genre, false);
+  if (isRandom) return buildRandom(type, genre, false);
 
-  if (entry && (Date.now() - entry.ts) < CACHE_TTL) return entry.metas;
+  // Upcoming: dipende dalla build del catalog principale
+  if (isUpcoming) {
+    if (cache[catalogId]) return cache[catalogId].metas;
+    await getCatalogCached(catalogId.replace('-upcoming', ''), type);
+    return cache[catalogId]?.metas || [];
+  }
 
-  console.log('[cache miss] ' + catalogId + ' — aggiorno...');
-  const metas = isRecommended
-    ? await buildRecommendations(type)
-    : await buildCatalog(type);
+  const entry = cache[catalogId];
+  const stale = !entry || (Date.now() - entry.ts) >= CACHE_TTL;
 
-  // null = ETag 304: riusa cache esistente estendendo il TTL
-  if (metas === null && entry) {
-    entry.ts = Date.now();
-    console.log('[etag] ' + catalogId + ': cache estesa senza rebuild');
+  if (!stale) return entry.metas;
+
+  // Stale-while-revalidate: risponde subito con la cache esistente, aggiorna in background
+  if (entry) {
+    entry.ts = Date.now(); // previene richieste concorrenti durante il rebuild
+    ;(async () => {
+      try {
+        const metas = isRecommended ? await buildRecommendations(type) : await buildCatalog(type);
+        if (metas !== null) {
+          cache[catalogId] = { metas, ts: Date.now() };
+          prefetchMeta(metas, type === 'movie' ? 'movie' : 'series');
+          saveCacheToDisk();
+          console.log('[bg-refresh] ' + catalogId + ': ' + metas.length + ' elementi');
+        } else {
+          // ETag 304: watchlist invariata — controlla se qualche upcoming è diventato released
+          const upcomingId = type === 'movie' ? 'trakt-movies-upcoming' : 'trakt-series-upcoming';
+          const upcomingMetas = cache[upcomingId]?.metas || [];
+          const now = new Date();
+          const newReleased = upcomingMetas.filter(m => m.releaseDate && new Date(m.releaseDate) <= now);
+          if (newReleased.length) {
+            cache[upcomingId] = { metas: upcomingMetas.filter(m => !newReleased.includes(m)), ts: Date.now() };
+            const cleaned = newReleased.map(({ upcoming, releaseDate, ...rest }) => rest);
+            cache[catalogId] = { metas: (cache[catalogId]?.metas || []).concat(cleaned), ts: Date.now() };
+            saveCacheToDisk();
+            console.log('[upcoming→released] ' + newReleased.length + ' titoli spostati automaticamente');
+          }
+        }
+      } catch (e) { console.warn('[bg-refresh] ' + catalogId + ':', e.message); }
+    })();
     return entry.metas;
   }
-  if (metas === null) return [];
 
+  // Prima build (nessuna cache disponibile)
+  console.log('[cache miss] ' + catalogId + ' — aggiorno...');
+  const metas = isRecommended ? await buildRecommendations(type) : await buildCatalog(type);
+  if (metas === null) return [];
   cache[catalogId] = { metas, ts: Date.now() };
   console.log('[cache] ' + catalogId + ': ' + metas.length + ' elementi');
   prefetchMeta(metas, type === 'movie' ? 'movie' : 'series');
