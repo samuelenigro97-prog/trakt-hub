@@ -18,7 +18,7 @@ const META_CACHE_VERSION = 4; // incrementa quando cambia il formato del meta
 
 const manifest = {
   id: 'it.samuele.trakt.watchlist',
-  version: '1.3.0',
+  version: '1.3.1',
   name: 'Trakt Hub',
   description: 'La tua watchlist Trakt: Da vedere, Scegli per me, aggiungi e segna come visto direttamente da Stremio.',
   resources: ['catalog', 'stream'],
@@ -846,22 +846,6 @@ async function main() {
     } catch (e) {
       console.error('Errore catalogo:', e.message);
       return { metas: [] };
-    }
-  });
-
-  builder.defineMetaHandler(async ({ type, id }) => {
-    try {
-      const key = type + ':' + id;
-      const entry = metaCache[key];
-      if (entry && entry.v === META_CACHE_VERSION && (Date.now() - entry.ts) < META_CACHE_TTL) return { meta: entry.meta };
-      const meta = await buildMeta(type, id);
-      if (!meta) return { meta: null };
-      metaCache[key] = { meta, ts: Date.now(), v: META_CACHE_VERSION };
-      setImmediate(saveCacheToDisk);
-      return { meta };
-    } catch (e) {
-      console.error('Errore meta:', e.message);
-      return { meta: null };
     }
   });
 
