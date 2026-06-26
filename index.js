@@ -18,7 +18,7 @@ const META_CACHE_VERSION = 4; // incrementa quando cambia il formato del meta
 
 const manifest = {
   id: 'it.samuele.trakt.watchlist',
-  version: '1.3.6',
+  version: '1.3.7',
   name: 'Trakt Hub',
   description: 'La tua watchlist Trakt: Da vedere, Scegli per me, aggiungi e segna come visto direttamente da Stremio.',
   resources: ['catalog', 'stream'],
@@ -761,14 +761,35 @@ function prefetchMeta(metas, stremioType) {
   })();
 }
 
-async function buildRandom(type, genre) {
+async function buildRandom(type, genre, forHome = false) {
   const sourceCatalogId = type === 'movie' ? 'trakt-movies' : 'trakt-series';
   if (!cache[sourceCatalogId]) await getCatalogCached(sourceCatalogId, type);
   let source = cache[sourceCatalogId]?.metas || [];
   if (genre) source = source.filter(m => m.genres && m.genres.includes(genre));
   if (!source.length) return [];
-  const shuffled = [...source].sort(() => Math.random() - 0.5);
-  return shuffled.slice(0, 36);
+
+  if (forHome) {
+    // Un film casuale per genere — home view
+    const byGenre = {};
+    for (const m of source) {
+      for (const g of (m.genres || [])) {
+        if (!byGenre[g]) byGenre[g] = [];
+        byGenre[g].push(m);
+      }
+    }
+    const seen = new Set();
+    const picks = [];
+    for (const g of Object.keys(byGenre).sort(() => Math.random() - 0.5)) {
+      const candidates = byGenre[g].filter(m => !seen.has(m.id));
+      if (!candidates.length) continue;
+      const pick = candidates[Math.floor(Math.random() * candidates.length)];
+      picks.push(pick);
+      seen.add(pick.id);
+    }
+    return picks;
+  }
+
+  return [...source].sort(() => Math.random() - 0.5).slice(0, 100);
 }
 
 async function getCatalogCached(catalogId, type, genre) {
@@ -777,7 +798,7 @@ async function getCatalogCached(catalogId, type, genre) {
   const isRandom = catalogId.includes('random');
 
   // Random: nessuna cache, shuffle ad ogni apertura
-  if (isRandom) return await buildRandom(type, genre);
+  if (isRandom) return await buildRandom(type, genre, false);
 
   if (entry && (Date.now() - entry.ts) < CACHE_TTL) return entry.metas;
 
@@ -841,9 +862,12 @@ async function main() {
     try {
       const skip = parseInt(extra?.skip || 0);
       const genre = extra?.genre || null;
-      let allMetas = await getCatalogCached(id, type, genre);
+      const forHome = id.includes('random') && skip === 0 && !genre;
+      let allMetas = forHome
+        ? await buildRandom(type, genre, true)
+        : await getCatalogCached(id, type, genre);
       if (genre && !id.includes('random')) allMetas = allMetas.filter(m => m.genres && m.genres.includes(genre));
-      const metas = allMetas.slice(skip, skip + 100);
+      const metas = forHome ? allMetas : allMetas.slice(skip, skip + 100);
       return { metas };
     } catch (e) {
       console.error('Errore catalogo:', e.message);
@@ -910,7 +934,10 @@ a{color:${color};text-decoration:none;font-size:.9rem}</style></head>
     try {
       const { ok, status } = await traktAction('add', req.params.type, req.params.id);
       if (ok) {
-        delete cache['trakt-' + (req.params.type === 'movies' ? 'movies' : 'series')];
+        const cId = 'trakt-' + (req.params.type === 'movies' ? 'movies' : 'series');
+        const mType = req.params.type === 'movies' ? 'movie' : 'series';
+        delete cache[cId];
+        setImmediate(() => getCatalogCached(cId, mType).catch(() => {}));
         console.log('[watchlist] Aggiunto:', req.params.id);
         res.send(htmlPage('✅ Aggiunto!', 'Il titolo è stato aggiunto alla tua Watchlist Trakt.<br>Chiudi questa pagina e aggiorna Stremio.', '#4ade80'));
       } else {
@@ -925,9 +952,11 @@ a{color:${color};text-decoration:none;font-size:.9rem}</style></head>
     try {
       const { ok, status } = await traktAction('remove', req.params.type, req.params.id);
       if (ok) {
-        delete cache['trakt-' + (req.params.type === 'movies' ? 'movies' : 'series')];
+        const cId = 'trakt-' + (req.params.type === 'movies' ? 'movies' : 'series');
         const metaType = req.params.type === 'movies' ? 'movie' : 'series';
+        delete cache[cId];
         delete metaCache[metaType + ':' + req.params.id];
+        setImmediate(() => getCatalogCached(cId, metaType).catch(() => {}));
         console.log('[watchlist] Rimosso:', req.params.id);
         res.send(htmlPage('🗑️ Rimosso!', 'Il titolo è stato rimosso dalla tua Watchlist Trakt.<br>Chiudi questa pagina e aggiorna Stremio.', '#fb923c'));
       } else {
@@ -961,9 +990,10 @@ a{color:${color};text-decoration:none;font-size:.9rem}</style></head>
       if (r.ok) {
         // Invalida catalogo e meta così sparisce dal Da vedere
         const catalogId = 'trakt-' + (type === 'movies' ? 'movies' : 'series');
-        delete cache[catalogId];
         const metaType = type === 'movies' ? 'movie' : 'series';
+        delete cache[catalogId];
         delete metaCache[metaType + ':' + id];
+        setImmediate(() => getCatalogCached(catalogId, metaType).catch(() => {}));
         console.log('[watched] Segnato come visto:', id);
         res.send(htmlPage('✅ Segnato come visto!', 'Trakt è stato aggiornato.<br>Chiudi questa pagina e aggiorna Stremio per vederlo scomparire dal catalogo.', '#4ade80'));
       } else {
