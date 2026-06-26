@@ -18,10 +18,10 @@ const META_CACHE_VERSION = 4; // incrementa quando cambia il formato del meta
 
 const manifest = {
   id: 'it.samuele.trakt.watchlist',
-  version: '1.3.1',
+  version: '1.3.2',
   name: 'Trakt Hub',
   description: 'La tua watchlist Trakt: Da vedere, Scegli per me, aggiungi e segna come visto direttamente da Stremio.',
-  resources: ['catalog', 'stream'],
+  resources: ['catalog', 'meta', 'stream'],
   types: ['movie', 'series'],
   catalogs: [
     { type: 'movie',  id: 'trakt-movies',        name: 'Da vedere',     extra: [{ name: 'skip' }, { name: 'genre' }] },
@@ -403,10 +403,12 @@ async function buildMeta(type, stremioId) {
   const enOverview = en?.overview?.trim() || '';
   let overview = itOverview;
   if (!overview && enOverview) overview = await translateToItalian(enOverview);
-  const cast = (base.credits?.cast || []).slice(0, 6).map(a => a.name);
+  const cast = (base.credits?.cast || []).slice(0, 8).map(a => a.name);
   let director = [];
+  let writer = [];
   if (type === 'movie') {
     director = (base.credits?.crew || []).filter(c => c.job === 'Director').map(c => c.name);
+    writer = (base.credits?.crew || []).filter(c => c.department === 'Writing').slice(0, 2).map(c => c.name);
   } else {
     director = (base.created_by || []).map(c => c.name);
   }
@@ -528,7 +530,7 @@ async function buildMeta(type, stremioId) {
     description: overview,
     genres:      (it?.genres || en?.genres || []).map(g => g.name),
     imdbRating:  base.vote_average ? String(base.vote_average.toFixed(1)) : undefined,
-    year, cast, director, runtime, trailers, links,
+    year, cast, director, writer, runtime, trailers, links,
     ...(videos.length ? { videos } : {})
   };
 }
@@ -846,6 +848,22 @@ async function main() {
     } catch (e) {
       console.error('Errore catalogo:', e.message);
       return { metas: [] };
+    }
+  });
+
+  builder.defineMetaHandler(async ({ type, id }) => {
+    try {
+      const key = type + ':' + id;
+      const entry = metaCache[key];
+      if (entry && entry.v === META_CACHE_VERSION && (Date.now() - entry.ts) < META_CACHE_TTL) return { meta: entry.meta };
+      const meta = await buildMeta(type, id);
+      if (!meta) return { meta: null };
+      metaCache[key] = { meta, ts: Date.now(), v: META_CACHE_VERSION };
+      setImmediate(saveCacheToDisk);
+      return { meta };
+    } catch (e) {
+      console.error('Errore meta:', e.message);
+      return { meta: null };
     }
   });
 
