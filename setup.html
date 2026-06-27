@@ -13,17 +13,30 @@
       min-height: 100vh;
       padding: 2rem 1rem 4rem;
     }
-    header {
-      text-align: center;
-      margin-bottom: 2.5rem;
-    }
+    header { text-align: center; margin-bottom: 2rem; }
     header h1 { font-size: 1.8rem; color: #a855f7; margin-bottom: .3rem; }
     header p { color: #666; font-size: .9rem; }
 
-    .section {
+    .install-all-btn {
+      display: block;
       max-width: 680px;
-      margin: 0 auto 2rem;
+      margin: 0 auto 2.5rem;
+      background: linear-gradient(135deg, #7c3aed, #a855f7);
+      color: #fff;
+      border: none;
+      border-radius: .75rem;
+      padding: 1rem;
+      font-size: 1.05rem;
+      font-weight: 700;
+      cursor: pointer;
+      width: 100%;
+      transition: opacity .15s, transform .1s;
+      letter-spacing: .02em;
     }
+    .install-all-btn:hover { opacity: .9; }
+    .install-all-btn:active { transform: scale(.98); }
+
+    .section { max-width: 680px; margin: 0 auto 2rem; }
     .section-title {
       font-size: .7rem;
       text-transform: uppercase;
@@ -33,7 +46,6 @@
       border-left: 3px solid #a855f7;
       margin-bottom: .9rem;
     }
-
     .card {
       background: #16162a;
       border: 1px solid #252540;
@@ -48,60 +60,91 @@
     .card:hover { border-color: #3d3d60; }
     .card.disabled { opacity: .35; pointer-events: none; }
     .card-info { flex: 1; min-width: 0; }
-    .card-name {
-      font-weight: 600;
-      font-size: .95rem;
-      display: flex;
-      align-items: center;
-      gap: .4rem;
-      flex-wrap: wrap;
-    }
+    .card-name { font-weight: 600; font-size: .95rem; display: flex; align-items: center; gap: .4rem; flex-wrap: wrap; }
     .card-desc { font-size: .78rem; color: #777; margin-top: .2rem; }
     .badge {
-      font-size: .6rem;
-      font-weight: 600;
-      text-transform: uppercase;
-      letter-spacing: .06em;
-      padding: .15rem .4rem;
-      border-radius: .25rem;
-      background: #1f1f3a;
-      color: #a855f7;
-      border: 1px solid #3d2a6a;
+      font-size: .6rem; font-weight: 600; text-transform: uppercase;
+      letter-spacing: .06em; padding: .15rem .4rem; border-radius: .25rem;
+      background: #1f1f3a; color: #a855f7; border: 1px solid #3d2a6a;
     }
     .badge.disabled { color: #555; border-color: #333; }
-
     .btn {
-      background: #7c3aed;
-      color: #fff;
-      border: none;
-      border-radius: .5rem;
-      padding: .5rem 1.1rem;
-      font-size: .82rem;
-      font-weight: 600;
-      cursor: pointer;
-      white-space: nowrap;
-      transition: background .15s, transform .1s;
-      flex-shrink: 0;
+      background: #7c3aed; color: #fff; border: none; border-radius: .5rem;
+      padding: .5rem 1.1rem; font-size: .82rem; font-weight: 600; cursor: pointer;
+      white-space: nowrap; transition: background .15s, transform .1s; flex-shrink: 0;
     }
     .btn:hover { background: #6d28d9; }
     .btn:active { transform: scale(.96); }
     .btn.ok { background: #16a34a; }
-    .btn.todo { background: #374151; cursor: not-allowed; }
+
+    /* ── Wizard overlay ── */
+    .overlay {
+      display: none;
+      position: fixed; inset: 0;
+      background: rgba(0,0,0,.85);
+      z-index: 100;
+      align-items: center;
+      justify-content: center;
+      padding: 1rem;
+    }
+    .overlay.open { display: flex; }
+    .wizard {
+      background: #16162a;
+      border: 1px solid #3d2a6a;
+      border-radius: 1rem;
+      padding: 2rem 1.75rem;
+      max-width: 480px;
+      width: 100%;
+      text-align: center;
+    }
+    .wiz-progress {
+      font-size: .75rem; color: #777; margin-bottom: 1.5rem; letter-spacing: .05em;
+    }
+    .wiz-progress span { color: #a855f7; font-weight: 700; }
+    .progress-bar {
+      height: 4px; background: #252540; border-radius: 2px; margin-bottom: 1.75rem; overflow: hidden;
+    }
+    .progress-fill {
+      height: 100%; background: linear-gradient(90deg, #7c3aed, #a855f7);
+      border-radius: 2px; transition: width .4s ease;
+    }
+    .wiz-name {
+      font-size: 1.3rem; font-weight: 700; color: #e2e2e2; margin-bottom: .4rem;
+    }
+    .wiz-desc { font-size: .85rem; color: #777; margin-bottom: 2rem; min-height: 1.5rem; }
+    .wiz-actions { display: flex; gap: .75rem; justify-content: center; flex-wrap: wrap; }
+    .wiz-install {
+      background: linear-gradient(135deg, #7c3aed, #a855f7);
+      color: #fff; border: none; border-radius: .6rem;
+      padding: .75rem 1.75rem; font-size: .95rem; font-weight: 700;
+      cursor: pointer; transition: opacity .15s, transform .1s; flex: 1; max-width: 200px;
+    }
+    .wiz-install:hover { opacity: .9; }
+    .wiz-install:active { transform: scale(.97); }
+    .wiz-install.ok { background: #16a34a; }
+    .wiz-next {
+      background: transparent; color: #a855f7;
+      border: 1px solid #a855f7; border-radius: .6rem;
+      padding: .75rem 1.75rem; font-size: .95rem; font-weight: 600;
+      cursor: pointer; transition: background .15s; flex: 1; max-width: 200px;
+    }
+    .wiz-next:hover { background: rgba(168,85,247,.1); }
+    .wiz-close {
+      margin-top: 1.25rem; background: none; border: none;
+      color: #444; font-size: .8rem; cursor: pointer;
+    }
+    .wiz-close:hover { color: #777; }
+    .wiz-done { font-size: 3rem; margin-bottom: 1rem; }
+    .wiz-done-title { font-size: 1.4rem; font-weight: 700; color: #a855f7; margin-bottom: .5rem; }
+    .wiz-done-desc { font-size: .9rem; color: #777; margin-bottom: 1.5rem; }
 
     .toast {
-      position: fixed;
-      bottom: 1.5rem;
-      left: 50%;
+      position: fixed; bottom: 1.5rem; left: 50%;
       transform: translateX(-50%) translateY(4rem);
-      background: #16a34a;
-      color: #fff;
-      padding: .6rem 1.4rem;
-      border-radius: 2rem;
-      font-size: .85rem;
-      font-weight: 600;
-      transition: transform .25s ease;
-      pointer-events: none;
-      z-index: 999;
+      background: #16a34a; color: #fff;
+      padding: .6rem 1.4rem; border-radius: 2rem;
+      font-size: .85rem; font-weight: 600;
+      transition: transform .25s ease; pointer-events: none; z-index: 999;
     }
     .toast.show { transform: translateX(-50%) translateY(0); }
   </style>
@@ -110,13 +153,14 @@
 
 <header>
   <h1>🎬 Samuele's Stremio</h1>
-  <p>Tocca Installa per copiare l'URL — poi incollalo nella barra addon di Stremio</p>
+  <p>Installa i tuoi addon con un click</p>
 </header>
+
+<button class="install-all-btn" onclick="startWizard()">⚡ Installa tutti gli addon</button>
 
 <!-- TUOI ADDON -->
 <div class="section">
   <div class="section-title">Tuoi addon</div>
-
   <div class="card">
     <div class="card-info">
       <div class="card-name">Trakt Hub <span class="badge">personale</span></div>
@@ -124,7 +168,6 @@
     </div>
     <button class="btn" onclick="install('https://stremio-trakt-addon-m4gw.onrender.com/manifest.json', this)">Installa</button>
   </div>
-
   <div class="card">
     <div class="card-info">
       <div class="card-name">Trakt Integration <span class="badge">personale</span></div>
@@ -132,7 +175,6 @@
     </div>
     <button class="btn" onclick="install('https://www.strem.io/trakt/addon/6a24443eb9126d98784179f5/manifest.json', this)">Installa</button>
   </div>
-
   <div class="card">
     <div class="card-info">
       <div class="card-name">DMV 🟣 <span class="badge">personale</span></div>
@@ -145,7 +187,6 @@
 <!-- STREAMING ITA -->
 <div class="section">
   <div class="section-title">Streaming ITA</div>
-
   <div class="card">
     <div class="card-info">
       <div class="card-name">IlCorsaroViola 📦🇮🇹 <span class="badge">personale</span></div>
@@ -153,7 +194,6 @@
     </div>
     <button class="btn" onclick="install('https://icv.stremio-italia.eu/eyJ0bWRiX2tleSI6IjU0NjJmNzg0NjlmM2Q4MGJmNTIwMTY0NTI5NGMxNmU0IiwidXNlX3RvcmJveCI6dHJ1ZSwidG9yYm94X2tleSI6Ijc3YzAyNDNkLTg1NzMtNDdmMS05MjA4LTg2ZThlMzI5ZmNlZCIsInVzZV9jb3JzYXJvbmVybyI6ZmFsc2UsInVzZV91aW5kZXgiOmZhbHNlLCJ1c2Vfa25hYmVuIjp0cnVlLCJ1c2VfdG9ycmVudGdhbGF4eSI6dHJ1ZSwidXNlX3RvcnJlbnRpbyI6dHJ1ZSwidXNlX21lZGlhZnVzaW9uIjp0cnVlLCJ1c2VfY29tZXQiOnRydWUsInVzZV9zdHJlbXRocnVfdG9yeiI6dHJ1ZSwidXNlX21ldGVvciI6dHJ1ZSwidXNlX3JhcmJnIjp0cnVlLCJ1c2VfamFja2V0dCI6dHJ1ZSwiZnVsbF9pdGEiOnRydWUsImNvbnRlbnRfbGFuZ3VhZ2UiOiJpdGFsaWFuIiwiZGJfb25seSI6ZmFsc2UsInVzZV9nbG9iYWxfY2FjaGUiOmZhbHNlLCJvbmx5X2RlYnJpZF9jYWNoZSI6ZmFsc2UsImh5YnJpZF9tb2RlIjp0cnVlLCJleGNsdWRlXzcyMHAiOnRydWUsImV4Y2x1ZGVfc2QiOnRydWUsImV4Y2x1ZGVfdW5rbm93biI6dHJ1ZSwiZXhjbHVkZV9kdiI6dHJ1ZSwiYWlvc3RyZWFtc19tb2RlIjp0cnVlfQ/manifest.json', this)">Installa</button>
   </div>
-
   <div class="card">
     <div class="card-info">
       <div class="card-name">MammaMia <span class="badge">personale</span></div>
@@ -161,7 +201,6 @@
     </div>
     <button class="btn" onclick="install('https://mammamia.stremio-italia.eu/fFNDfEFXfExJVkVUVnxDQnxHU3xHSER8R098R0Z8RVN8UlR8VEl8T1NUfFZEfFNDX01GUHw=/manifest.json', this)">Installa</button>
   </div>
-
   <div class="card">
     <div class="card-info">
       <div class="card-name">Torrentio TB <span class="badge">personale</span></div>
@@ -169,7 +208,6 @@
     </div>
     <button class="btn" onclick="install('https://torrentio.strem.fun/providers=yts,eztv,rarbg,1337x,thepiratebay,kickasstorrents,torrentgalaxy,magnetdl,horriblesubs,nyaasi,tokyotosho,anidex,nekobt,ilcorsaronero|language=italian|qualityfilter=threed,,scr,cam,unknown|limit=10|sort=qualitysize|debridoptions=nocatalog|torbox=77c0243d-8573-47f1-9208-86e8e329fced/manifest.json', this)">Installa</button>
   </div>
-
   <div class="card">
     <div class="card-info">
       <div class="card-name">Easy Streams</div>
@@ -177,7 +215,6 @@
     </div>
     <button class="btn" onclick="install('https://easystreams.realbestia.com/%7B%22aiostreamsMode%22%3A%22on%22%7D/manifest.json', this)">Installa</button>
   </div>
-
   <div class="card">
     <div class="card-info">
       <div class="card-name">WebStreamrMBG</div>
@@ -190,7 +227,6 @@
 <!-- CATALOGHI -->
 <div class="section">
   <div class="section-title">Cataloghi</div>
-
   <div class="card">
     <div class="card-info">
       <div class="card-name">TOP Streaming 🇮🇹 <span class="badge">personale</span></div>
@@ -198,7 +234,6 @@
     </div>
     <button class="btn" onclick="install('https://top-streaming.stream/ee089b1e-8aec-443b-b0ce-9a17f1aafe33/manifest.json', this)">Installa</button>
   </div>
-
   <div class="card">
     <div class="card-info">
       <div class="card-name">DubbedAnimeFeed</div>
@@ -211,7 +246,6 @@
 <!-- META & TRAILER -->
 <div class="section">
   <div class="section-title">Meta & Trailer</div>
-
   <div class="card">
     <div class="card-info">
       <div class="card-name">AIOMetadata <span class="badge">personale</span></div>
@@ -219,7 +253,6 @@
     </div>
     <button class="btn" onclick="install('https://aiometadata.elfhosted.com/stremio/00f3e1e6-6d88-4a87-a02f-4c23f538faea/manifest.json', this)">Installa</button>
   </div>
-
   <div class="card">
     <div class="card-info">
       <div class="card-name">Streailer</div>
@@ -232,7 +265,6 @@
 <!-- SOTTOTITOLI -->
 <div class="section">
   <div class="section-title">Sottotitoli</div>
-
   <div class="card">
     <div class="card-info">
       <div class="card-name">SubSense</div>
@@ -240,7 +272,6 @@
     </div>
     <button class="btn" onclick="install('https://subsense.nepiraw.com/hd7uwglr-%7B%22languages%22%3A%5B%22it%22%5D%2C%22maxSubtitles%22%3A10%7D/manifest.json', this)">Installa</button>
   </div>
-
   <div class="card">
     <div class="card-info">
       <div class="card-name">opensubtitles PRO <span class="badge">personale</span></div>
@@ -253,7 +284,6 @@
 <!-- DISABILITATI -->
 <div class="section">
   <div class="section-title">Disabilitati</div>
-
   <div class="card disabled">
     <div class="card-info">
       <div class="card-name">Streaming Catalogs Plus <span class="badge disabled">disabilitato</span></div>
@@ -261,39 +291,103 @@
     </div>
     <button class="btn" onclick="install('https://apps.soluserv.es/kids-es/c.351771819bdb1d0c0ce3f97f70c2f180cd45f987/manifest.json', this)">Installa</button>
   </div>
+</div>
 
-  <div class="card disabled">
-    <div class="card-info">
-      <div class="card-name">Comet TB <span class="badge disabled">disabilitato</span></div>
-      <div class="card-desc">Debrid alternativo a Torrentio</div>
-    </div>
-    <button class="btn todo" onclick="missing(this)">Da aggiungere</button>
-  </div>
-
-  <div class="card disabled">
-    <div class="card-info">
-      <div class="card-name">Meteor <span class="badge disabled">disabilitato</span></div>
-      <div class="card-desc">Debrid alternativo</div>
-    </div>
-    <button class="btn todo" onclick="missing(this)">Da aggiungere</button>
+<!-- Wizard overlay -->
+<div class="overlay" id="overlay">
+  <div class="wizard" id="wizard">
+    <!-- contenuto generato da JS -->
   </div>
 </div>
 
 <div id="toast" class="toast">✓ URL copiato — incollalo in Stremio</div>
 
 <script>
+const ADDONS = [
+  { name: 'Trakt Hub', desc: 'Watchlist, Da vedere, In arrivo, Scegli per me', url: 'https://stremio-trakt-addon-m4gw.onrender.com/manifest.json' },
+  { name: 'Trakt Integration', desc: 'Scrobbling automatico ufficiale Trakt', url: 'https://www.strem.io/trakt/addon/6a24443eb9126d98784179f5/manifest.json' },
+  { name: 'DMV 🟣', desc: 'Cast manager TorBox per IlCorsaroViola', url: 'https://dmv.stremio-italia.eu/torbox/5TqxkUJuFHCF8htE/no-catalog/manifest.json' },
+  { name: 'IlCorsaroViola 📦🇮🇹', desc: 'Scraping live, 15+ provider, TorBox integrato', url: 'https://icv.stremio-italia.eu/eyJ0bWRiX2tleSI6IjU0NjJmNzg0NjlmM2Q4MGJmNTIwMTY0NTI5NGMxNmU0IiwidXNlX3RvcmJveCI6dHJ1ZSwidG9yYm94X2tleSI6Ijc3YzAyNDNkLTg1NzMtNDdmMS05MjA4LTg2ZThlMzI5ZmNlZCIsInVzZV9jb3JzYXJvbmVybyI6ZmFsc2UsInVzZV91aW5kZXgiOmZhbHNlLCJ1c2Vfa25hYmVuIjp0cnVlLCJ1c2VfdG9ycmVudGdhbGF4eSI6dHJ1ZSwidXNlX3RvcnJlbnRpbyI6dHJ1ZSwidXNlX21lZGlhZnVzaW9uIjp0cnVlLCJ1c2VfY29tZXQiOnRydWUsInVzZV9zdHJlbXRocnVfdG9yeiI6dHJ1ZSwidXNlX21ldGVvciI6dHJ1ZSwidXNlX3JhcmJnIjp0cnVlLCJ1c2VfamFja2V0dCI6dHJ1ZSwiZnVsbF9pdGEiOnRydWUsImNvbnRlbnRfbGFuZ3VhZ2UiOiJpdGFsaWFuIiwiZGJfb25seSI6ZmFsc2UsInVzZV9nbG9iYWxfY2FjaGUiOmZhbHNlLCJvbmx5X2RlYnJpZF9jYWNoZSI6ZmFsc2UsImh5YnJpZF9tb2RlIjp0cnVlLCJleGNsdWRlXzcyMHAiOnRydWUsImV4Y2x1ZGVfc2QiOnRydWUsImV4Y2x1ZGVfdW5rbm93biI6dHJ1ZSwiZXhjbHVkZV9kdiI6dHJ1ZSwiYWlvc3RyZWFtc19tb2RlIjp0cnVlfQ/manifest.json' },
+  { name: 'MammaMia', desc: 'Film, serie e TV italiana in HTTPS', url: 'https://mammamia.stremio-italia.eu/fFNDfEFXfExJVkVUVnxDQnxHU3xHSER8R098R0Z8RVN8UlR8VEl8T1NUfFZEfFNDX01GUHw=/manifest.json' },
+  { name: 'Torrentio TB', desc: 'Torrent multi-provider filtrati ITA con TorBox', url: 'https://torrentio.strem.fun/providers=yts,eztv,rarbg,1337x,thepiratebay,kickasstorrents,torrentgalaxy,magnetdl,horriblesubs,nyaasi,tokyotosho,anidex,nekobt,ilcorsaronero|language=italian|qualityfilter=threed,,scr,cam,unknown|limit=10|sort=qualitysize|debridoptions=nocatalog|torbox=77c0243d-8573-47f1-9208-86e8e329fced/manifest.json' },
+  { name: 'Easy Streams', desc: 'Stream alternativi (aiostreams mode)', url: 'https://easystreams.realbestia.com/%7B%22aiostreamsMode%22%3A%22on%22%7D/manifest.json' },
+  { name: 'WebStreamrMBG', desc: 'Stream web multilingua ITA', url: 'https://87d6a6ef6b58-webstreamrmbg.baby-beamup.club/%7B%22multi%22%3A%22on%22%2C%22it%22%3A%22on%22%2C%22mediaFlowProxyUrl%22%3A%22%22%2C%22mediaFlowProxyPassword%22%3A%22%22%7D/manifest.json' },
+  { name: 'TOP Streaming 🇮🇹', desc: 'Netflix, Prime, Disney+, Sky, NOW, Rai Play e altri', url: 'https://top-streaming.stream/ee089b1e-8aec-443b-b0ce-9a17f1aafe33/manifest.json' },
+  { name: 'DubbedAnimeFeed', desc: 'Anime doppiati in italiano', url: 'https://2e89550f1b1c-dubbedanimefeed.baby-beamup.club/%7B%22tmdbKey%22%3A%22edf2b5b43d56fa6eea398145d50a1e98%22%7D/manifest.json' },
+  { name: 'AIOMetadata', desc: 'Schede dettaglio arricchite', url: 'https://aiometadata.elfhosted.com/stremio/00f3e1e6-6d88-4a87-a02f-4c23f538faea/manifest.json' },
+  { name: 'Streailer', desc: 'Trailer in italiano', url: 'https://streailer.elfhosted.com/%7B%22language%22%3A%22it-IT%22%2C%22externalLink%22%3Afalse%2C%22showRecap%22%3Atrue%2C%22onlyRecaps%22%3Afalse%7D/manifest.json' },
+  { name: 'SubSense', desc: 'Sottotitoli in italiano', url: 'https://subsense.nepiraw.com/hd7uwglr-%7B%22languages%22%3A%5B%22it%22%5D%2C%22maxSubtitles%22%3A10%7D/manifest.json' },
+  { name: 'opensubtitles PRO', desc: 'Sottotitoli italiani, AI-translated, senza pubblicità', url: 'https://opensubtitlesv3-pro.dexter21767.com/eyJsYW5ncyI6WyJpdGFsaWFuIl0sInNvdXJjZSI6ImFsbCIsImFpVHJhbnNsYXRlZCI6dHJ1ZSwiYXV0b0FkanVzdG1lbnQiOnRydWV9/manifest.json' },
+];
+
+let wizStep = 0;
+
+function startWizard() {
+  wizStep = 0;
+  document.getElementById('overlay').classList.add('open');
+  renderWizard();
+}
+
+function renderWizard() {
+  const total = ADDONS.length;
+  const wiz = document.getElementById('wizard');
+  if (wizStep >= total) {
+    wiz.innerHTML = `
+      <div class="wiz-done">🎉</div>
+      <div class="wiz-done-title">Tutto installato!</div>
+      <div class="wiz-done-desc">Hai configurato tutti e ${total} gli addon. Apri Stremio e goditi.</div>
+      <button class="wiz-install" onclick="closeWizard()">Chiudi</button>
+    `;
+    return;
+  }
+  const a = ADDONS[wizStep];
+  const pct = Math.round((wizStep / total) * 100);
+  wiz.innerHTML = `
+    <div class="wiz-progress">ADDON <span>${wizStep + 1}</span> DI <span>${total}</span></div>
+    <div class="progress-bar"><div class="progress-fill" style="width:${pct}%"></div></div>
+    <div class="wiz-name">${a.name}</div>
+    <div class="wiz-desc">${a.desc}</div>
+    <div class="wiz-actions">
+      <button class="wiz-install" id="wiz-btn" onclick="wizInstall()">⬇ Installa</button>
+      <button class="wiz-next" onclick="wizNext()">${wizStep < total - 1 ? 'Salta →' : 'Fine'}</button>
+    </div>
+    <button class="wiz-close" onclick="closeWizard()">× chiudi</button>
+  `;
+}
+
+function wizInstall() {
+  const a = ADDONS[wizStep];
+  navigator.clipboard.writeText(a.url).catch(() => {});
+  window.open('stremio://addon/' + encodeURIComponent(a.url), '_blank');
+  const btn = document.getElementById('wiz-btn');
+  btn.textContent = '✓ Copiato!';
+  btn.classList.add('ok');
+  setTimeout(wizNext, 1500);
+}
+
+function wizNext() {
+  wizStep++;
+  renderWizard();
+}
+
+function closeWizard() {
+  document.getElementById('overlay').classList.remove('open');
+}
+
+document.getElementById('overlay').addEventListener('click', function(e) {
+  if (e.target === this) closeWizard();
+});
+
 function install(url, btn) {
   navigator.clipboard.writeText(url).catch(() => {});
+  window.open('stremio://addon/' + encodeURIComponent(url), '_blank');
   const orig = btn.textContent;
   btn.textContent = '✓ Copiato!';
   btn.classList.add('ok');
   setTimeout(() => { btn.textContent = orig; btn.classList.remove('ok'); }, 2000);
   showToast();
 }
-function missing(btn) {
-  btn.textContent = 'URL mancante';
-  setTimeout(() => { btn.textContent = 'Da aggiungere'; }, 1500);
-}
+
 function showToast() {
   const t = document.getElementById('toast');
   t.classList.add('show');
