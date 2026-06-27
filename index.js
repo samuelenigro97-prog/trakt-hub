@@ -961,6 +961,7 @@ async function main() {
 
   const app = express();
   app.get('/logo.png', (req, res) => res.sendFile(path.join(__dirname, 'logo.png')));
+  app.get('/setup', (req, res) => res.sendFile(path.join(__dirname, 'setup.html')));
 
   const traktAction = async (action, traktType, stremioId) => {
     const imdbId = stremioId.startsWith('tt') ? stremioId : null;

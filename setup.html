@@ -1,0 +1,304 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Samuele · Stremio Setup</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #0d0d1a;
+      color: #e2e2e2;
+      min-height: 100vh;
+      padding: 2rem 1rem 4rem;
+    }
+    header {
+      text-align: center;
+      margin-bottom: 2.5rem;
+    }
+    header h1 { font-size: 1.8rem; color: #a855f7; margin-bottom: .3rem; }
+    header p { color: #666; font-size: .9rem; }
+
+    .section {
+      max-width: 680px;
+      margin: 0 auto 2rem;
+    }
+    .section-title {
+      font-size: .7rem;
+      text-transform: uppercase;
+      letter-spacing: .12em;
+      color: #555;
+      padding-left: .75rem;
+      border-left: 3px solid #a855f7;
+      margin-bottom: .9rem;
+    }
+
+    .card {
+      background: #16162a;
+      border: 1px solid #252540;
+      border-radius: .75rem;
+      padding: .9rem 1.1rem;
+      margin-bottom: .6rem;
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+      transition: border-color .15s;
+    }
+    .card:hover { border-color: #3d3d60; }
+    .card.disabled { opacity: .35; pointer-events: none; }
+    .card-info { flex: 1; min-width: 0; }
+    .card-name {
+      font-weight: 600;
+      font-size: .95rem;
+      display: flex;
+      align-items: center;
+      gap: .4rem;
+      flex-wrap: wrap;
+    }
+    .card-desc { font-size: .78rem; color: #777; margin-top: .2rem; }
+    .badge {
+      font-size: .6rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: .06em;
+      padding: .15rem .4rem;
+      border-radius: .25rem;
+      background: #1f1f3a;
+      color: #a855f7;
+      border: 1px solid #3d2a6a;
+    }
+    .badge.disabled { color: #555; border-color: #333; }
+
+    .btn {
+      background: #7c3aed;
+      color: #fff;
+      border: none;
+      border-radius: .5rem;
+      padding: .5rem 1.1rem;
+      font-size: .82rem;
+      font-weight: 600;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: background .15s, transform .1s;
+      flex-shrink: 0;
+    }
+    .btn:hover { background: #6d28d9; }
+    .btn:active { transform: scale(.96); }
+    .btn.ok { background: #16a34a; }
+    .btn.todo { background: #374151; cursor: not-allowed; }
+
+    .toast {
+      position: fixed;
+      bottom: 1.5rem;
+      left: 50%;
+      transform: translateX(-50%) translateY(4rem);
+      background: #16a34a;
+      color: #fff;
+      padding: .6rem 1.4rem;
+      border-radius: 2rem;
+      font-size: .85rem;
+      font-weight: 600;
+      transition: transform .25s ease;
+      pointer-events: none;
+      z-index: 999;
+    }
+    .toast.show { transform: translateX(-50%) translateY(0); }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>🎬 Samuele's Stremio</h1>
+  <p>Tocca Installa per copiare l'URL — poi incollalo nella barra addon di Stremio</p>
+</header>
+
+<!-- TUOI ADDON -->
+<div class="section">
+  <div class="section-title">Tuoi addon</div>
+
+  <div class="card">
+    <div class="card-info">
+      <div class="card-name">Trakt Hub <span class="badge">personale</span></div>
+      <div class="card-desc">Watchlist, Da vedere, In arrivo, Scegli per me</div>
+    </div>
+    <button class="btn" onclick="install('https://stremio-trakt-addon-m4gw.onrender.com/manifest.json', this)">Installa</button>
+  </div>
+
+  <div class="card">
+    <div class="card-info">
+      <div class="card-name">Trakt Integration <span class="badge">personale</span></div>
+      <div class="card-desc">Scrobbling automatico ufficiale Trakt</div>
+    </div>
+    <button class="btn" onclick="install('https://www.strem.io/trakt/addon/6a24443eb9126d98784179f5/manifest.json', this)">Installa</button>
+  </div>
+
+  <div class="card">
+    <div class="card-info">
+      <div class="card-name">DMV 🟣 <span class="badge">personale</span></div>
+      <div class="card-desc">Cast manager TorBox per IlCorsaroViola</div>
+    </div>
+    <button class="btn" onclick="install('https://dmv.stremio-italia.eu/torbox/5TqxkUJuFHCF8htE/no-catalog/manifest.json', this)">Installa</button>
+  </div>
+</div>
+
+<!-- STREAMING ITA -->
+<div class="section">
+  <div class="section-title">Streaming ITA</div>
+
+  <div class="card">
+    <div class="card-info">
+      <div class="card-name">IlCorsaroViola 📦🇮🇹 <span class="badge">personale</span></div>
+      <div class="card-desc">Scraping live, 15+ provider, TorBox integrato</div>
+    </div>
+    <button class="btn" onclick="install('https://icv.stremio-italia.eu/eyJ0bWRiX2tleSI6IjU0NjJmNzg0NjlmM2Q4MGJmNTIwMTY0NTI5NGMxNmU0IiwidXNlX3RvcmJveCI6dHJ1ZSwidG9yYm94X2tleSI6Ijc3YzAyNDNkLTg1NzMtNDdmMS05MjA4LTg2ZThlMzI5ZmNlZCIsInVzZV9jb3JzYXJvbmVybyI6ZmFsc2UsInVzZV91aW5kZXgiOmZhbHNlLCJ1c2Vfa25hYmVuIjp0cnVlLCJ1c2VfdG9ycmVudGdhbGF4eSI6dHJ1ZSwidXNlX3RvcnJlbnRpbyI6dHJ1ZSwidXNlX21lZGlhZnVzaW9uIjp0cnVlLCJ1c2VfY29tZXQiOnRydWUsInVzZV9zdHJlbXRocnVfdG9yeiI6dHJ1ZSwidXNlX21ldGVvciI6dHJ1ZSwidXNlX3JhcmJnIjp0cnVlLCJ1c2VfamFja2V0dCI6dHJ1ZSwiZnVsbF9pdGEiOnRydWUsImNvbnRlbnRfbGFuZ3VhZ2UiOiJpdGFsaWFuIiwiZGJfb25seSI6ZmFsc2UsInVzZV9nbG9iYWxfY2FjaGUiOmZhbHNlLCJvbmx5X2RlYnJpZF9jYWNoZSI6ZmFsc2UsImh5YnJpZF9tb2RlIjp0cnVlLCJleGNsdWRlXzcyMHAiOnRydWUsImV4Y2x1ZGVfc2QiOnRydWUsImV4Y2x1ZGVfdW5rbm93biI6dHJ1ZSwiZXhjbHVkZV9kdiI6dHJ1ZSwiYWlvc3RyZWFtc19tb2RlIjp0cnVlfQ/manifest.json', this)">Installa</button>
+  </div>
+
+  <div class="card">
+    <div class="card-info">
+      <div class="card-name">MammaMia <span class="badge">personale</span></div>
+      <div class="card-desc">Streaming italiano</div>
+    </div>
+    <button class="btn todo" onclick="missing(this)">Da aggiungere</button>
+  </div>
+
+  <div class="card">
+    <div class="card-info">
+      <div class="card-name">Torrentio TB <span class="badge">personale</span></div>
+      <div class="card-desc">Torrent con TorBox</div>
+    </div>
+    <button class="btn todo" onclick="missing(this)">Da aggiungere</button>
+  </div>
+
+  <div class="card">
+    <div class="card-info">
+      <div class="card-name">Easy Streams</div>
+      <div class="card-desc">Stream alternativi (aiostreams mode)</div>
+    </div>
+    <button class="btn" onclick="install('https://easystreams.realbestia.com/%7B%22aiostreamsMode%22%3A%22on%22%7D/manifest.json', this)">Installa</button>
+  </div>
+
+  <div class="card">
+    <div class="card-info">
+      <div class="card-name">WebStreamrMBG</div>
+      <div class="card-desc">Stream web multilingua ITA</div>
+    </div>
+    <button class="btn" onclick="install('https://87d6a6ef6b58-webstreamrmbg.baby-beamup.club/%7B%22multi%22%3A%22on%22%2C%22it%22%3A%22on%22%2C%22mediaFlowProxyUrl%22%3A%22%22%2C%22mediaFlowProxyPassword%22%3A%22%22%7D/manifest.json', this)">Installa</button>
+  </div>
+</div>
+
+<!-- CATALOGHI -->
+<div class="section">
+  <div class="section-title">Cataloghi</div>
+
+  <div class="card">
+    <div class="card-info">
+      <div class="card-name">TOP Streaming 🇮🇹 <span class="badge">personale</span></div>
+      <div class="card-desc">Netflix, Prime, Disney+, Sky, NOW, Rai Play e altri</div>
+    </div>
+    <button class="btn" onclick="install('https://top-streaming.stream/ee089b1e-8aec-443b-b0ce-9a17f1aafe33/manifest.json', this)">Installa</button>
+  </div>
+
+  <div class="card">
+    <div class="card-info">
+      <div class="card-name">DubbedAnimeFeed</div>
+      <div class="card-desc">Anime doppiati in italiano</div>
+    </div>
+    <button class="btn" onclick="install('https://2e89550f1b1c-dubbedanimefeed.baby-beamup.club/%7B%22tmdbKey%22%3A%22edf2b5b43d56fa6eea398145d50a1e98%22%7D/manifest.json', this)">Installa</button>
+  </div>
+</div>
+
+<!-- META & TRAILER -->
+<div class="section">
+  <div class="section-title">Meta & Trailer</div>
+
+  <div class="card">
+    <div class="card-info">
+      <div class="card-name">AIOMetadata <span class="badge">personale</span></div>
+      <div class="card-desc">Schede dettaglio arricchite</div>
+    </div>
+    <button class="btn" onclick="install('https://aiometadata.elfhosted.com/stremio/00f3e1e6-6d88-4a87-a02f-4c23f538faea/manifest.json', this)">Installa</button>
+  </div>
+
+  <div class="card">
+    <div class="card-info">
+      <div class="card-name">Streailer</div>
+      <div class="card-desc">Trailer in italiano</div>
+    </div>
+    <button class="btn" onclick="install('https://streailer.elfhosted.com/%7B%22language%22%3A%22it-IT%22%2C%22externalLink%22%3Afalse%2C%22showRecap%22%3Atrue%2C%22onlyRecaps%22%3Afalse%7D/manifest.json', this)">Installa</button>
+  </div>
+</div>
+
+<!-- SOTTOTITOLI -->
+<div class="section">
+  <div class="section-title">Sottotitoli</div>
+
+  <div class="card">
+    <div class="card-info">
+      <div class="card-name">SubSense</div>
+      <div class="card-desc">Sottotitoli in italiano</div>
+    </div>
+    <button class="btn" onclick="install('https://subsense.nepiraw.com/hd7uwglr-%7B%22languages%22%3A%5B%22it%22%5D%2C%22maxSubtitles%22%3A10%7D/manifest.json', this)">Installa</button>
+  </div>
+
+  <div class="card">
+    <div class="card-info">
+      <div class="card-name">opensubtitles PRO <span class="badge">personale</span></div>
+      <div class="card-desc">Sottotitoli professionali</div>
+    </div>
+    <button class="btn todo" onclick="missing(this)">Da aggiungere</button>
+  </div>
+</div>
+
+<!-- DISABILITATI -->
+<div class="section">
+  <div class="section-title">Disabilitati</div>
+
+  <div class="card disabled">
+    <div class="card-info">
+      <div class="card-name">Streaming Catalogs Plus <span class="badge disabled">disabilitato</span></div>
+      <div class="card-desc">Sostituito da TOP Streaming</div>
+    </div>
+    <button class="btn" onclick="install('https://apps.soluserv.es/kids-es/c.351771819bdb1d0c0ce3f97f70c2f180cd45f987/manifest.json', this)">Installa</button>
+  </div>
+
+  <div class="card disabled">
+    <div class="card-info">
+      <div class="card-name">Comet TB <span class="badge disabled">disabilitato</span></div>
+      <div class="card-desc">Debrid alternativo a Torrentio</div>
+    </div>
+    <button class="btn todo" onclick="missing(this)">Da aggiungere</button>
+  </div>
+
+  <div class="card disabled">
+    <div class="card-info">
+      <div class="card-name">Meteor <span class="badge disabled">disabilitato</span></div>
+      <div class="card-desc">Debrid alternativo</div>
+    </div>
+    <button class="btn todo" onclick="missing(this)">Da aggiungere</button>
+  </div>
+</div>
+
+<div id="toast" class="toast">✓ URL copiato — incollalo in Stremio</div>
+
+<script>
+function install(url, btn) {
+  navigator.clipboard.writeText(url).catch(() => {});
+  const orig = btn.textContent;
+  btn.textContent = '✓ Copiato!';
+  btn.classList.add('ok');
+  setTimeout(() => { btn.textContent = orig; btn.classList.remove('ok'); }, 2000);
+  showToast();
+}
+function missing(btn) {
+  btn.textContent = 'URL mancante';
+  setTimeout(() => { btn.textContent = 'Da aggiungere'; }, 1500);
+}
+function showToast() {
+  const t = document.getElementById('toast');
+  t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 2500);
+}
+</script>
+</body>
+</html>
