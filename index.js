@@ -3,15 +3,18 @@ const express = require('express');
 const fs = require('fs');
 const path = require('path');
 
-const TRAKT_CLIENT_ID = '2c69e58d7f6752cf77f936d4c6ae08b71267a6d8f0ef2b8a146bfb73794a81a4';
-const TRAKT_CLIENT_SECRET = process.env.TRAKT_CLIENT_SECRET || 'd7e484d8d9c5ed0513f80ed43446aa348e7523831c282bbf42ee65692b403f86';
-const TRAKT_USER = 'SamueleNigro';
-const TMDB_KEY = 'edf2b5b43d56fa6eea398145d50a1e98';
+const TRAKT_CLIENT_ID = process.env.TRAKT_CLIENT_ID;
+const TRAKT_CLIENT_SECRET = process.env.TRAKT_CLIENT_SECRET;
+const TRAKT_USER = process.env.TRAKT_USER || 'SamueleNigro';
+const TMDB_KEY = process.env.TMDB_KEY || '';
+if (!TRAKT_CLIENT_ID || !TRAKT_CLIENT_SECRET) {
+  throw new Error('Config mancante: imposta TRAKT_CLIENT_ID e TRAKT_CLIENT_SECRET nelle env var.');
+}
 const TOKEN_FILE = path.join(__dirname, 'trakt_token.json');
 const CACHE_FILE = path.join(__dirname, 'cache_data.json');
 const PORT = parseInt(process.env.PORT || '7779');
 const ADDON_URL = (process.env.ADDON_URL || 'http://192.168.178.188:7779').replace(/\/$/, '');
-const CLEAR_CACHE_TOKEN = 'samuele-clear-2024';
+const CLEAR_CACHE_TOKEN = process.env.CLEAR_CACHE_TOKEN || '';
 const CACHE_TTL = 60 * 1000; // 1 minuto
 const META_CACHE_TTL = 24 * 60 * 60 * 1000; // 24 ore
 const META_CACHE_VERSION = 4; // incrementa quando cambia il formato del meta
