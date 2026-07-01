@@ -24,7 +24,7 @@ const META_CACHE_VERSION = 4; // incrementa quando cambia il formato del meta
 
 const manifest = {
   id: 'it.samuele.trakt.watchlist',
-  version: '1.7.0',
+  version: '1.7.1',
   name: 'Trakt Hub',
   description: 'La tua watchlist Trakt: Da vedere, Scegli per me, aggiungi e segna come visto direttamente da Stremio.',
   resources: ['catalog', 'stream'],
@@ -45,6 +45,7 @@ const manifest = {
 let accessToken = null;
 let refreshToken = null;
 let tokenExpiresAt = 0; // epoch ms di scadenza access token (0 = sconosciuto)
+let tokenSource = 'none'; // 'file' | 'gist' | 'env' — da dove è stato caricato il token
 
 // cache[type] = { metas: [...], ts: Date.now() }
 const cache = {};
@@ -127,6 +128,7 @@ function applyToken(data, src) {
   accessToken = data.access_token;
   refreshToken = data.refresh_token || null;
   if (data.created_at && data.expires_in) tokenExpiresAt = (data.created_at + data.expires_in) * 1000;
+  tokenSource = src;
   console.log('Token Trakt caricato da ' + src);
 }
 
@@ -147,6 +149,7 @@ async function loadToken() {
   if (process.env.TRAKT_ACCESS_TOKEN) {
     accessToken = process.env.TRAKT_ACCESS_TOKEN;
     refreshToken = process.env.TRAKT_REFRESH_TOKEN || null;
+    tokenSource = 'env';
     console.log('Token Trakt caricato da variabile d\'ambiente');
     return true;
   }
@@ -1228,6 +1231,18 @@ a{color:${color};text-decoration:none;font-size:.9rem}</style></head>
       } catch (e) { console.warn('[refresh] errore:', e.message); }
     });
     res.json({ ok: true, message: 'Refresh cataloghi avviato in background' });
+  });
+
+  app.get('/health/:token', (req, res) => {
+    if (!CLEAR_CACHE_TOKEN || req.params.token !== CLEAR_CACHE_TOKEN) return res.status(403).json({ error: 'Non autorizzato' });
+    res.json({
+      version: manifest.version,
+      tokenSource,                       // 'file' | 'gist' | 'env' | 'none'
+      hasToken: !!accessToken,
+      gistConfigured: !!(GIST_TOKEN && GIST_ID),
+      stremioSyncConfigured: !!STREMIO_AUTHKEY,
+      tokenExpiresInDays: tokenExpiresAt ? Math.round((tokenExpiresAt - Date.now()) / 86400000 * 10) / 10 : null
+    });
   });
 
   app.get('/clear-cache/:token', (req, res) => {
