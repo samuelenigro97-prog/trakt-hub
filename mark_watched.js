@@ -153,33 +153,54 @@ function buildItem(norm, extra, itTitle, type) { // type: 'movie' | 'series'
   };
 }
 
-// kind = 'movies'|'shows' (Trakt), type = 'movie'|'series' (Stremio)
-async function processKind(token, kind, type) {
+// Solo fetch+normalizza (leggero): 1 chiamata Trakt. kind='movies'|'shows', type='movie'|'series'.
+async function fetchWatchedNorms(token, kind, type) {
   const label = type === 'movie' ? 'film' : 'serie';
   const norms = (await traktWatched(token, kind)).map(w => normalize(w, kind));
-  const withImdb = norms.filter(n => n.id);
+  const withImdb = norms.filter(n => n.id).map(n => ({ ...n, type }));
   const skipped = norms.filter(n => !n.id);
   console.log(`${label}: ${norms.length} visti | mappabili ${withImdb.length} | saltati (no IMDb) ${skipped.length}`);
   if (skipped.length) skipped.forEach(n => console.log(`  SKIP (${label}):`, n.title));
-  const extras = await mapPool(withImdb, 12, n => cinemetaMeta(type, n.id));
-  const itTitles = await mapPool(withImdb, 3, n => traktItTitle(kind, n.id, token));
-  return withImdb.map((n, i) => buildItem(n, extras[i] || {}, itTitles[i], type));
+  return withImdb;
+}
+
+// ID già marcati visti nella libreria Stremio (per saltare il lavoro inutile).
+async function existingFlaggedIds(authKey) {
+  const res = await fetch('https://api.strem.io/api/datastoreGet', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ authKey, collection: 'libraryItem', all: true })
+  });
+  const r = (await res.json()).result || [];
+  return new Set(r.filter(i => i.state && i.state.flaggedWatched === 1 && !i.removed).map(i => i._id));
 }
 
 (async () => {
+  const FORCE = process.argv.includes('--force'); // riprocessa tutto (rinfresca titoli/poster)
   const authKey = readAuthKey();
   const token = await ensureFreshToken();
-  console.log('recupero visti (film + serie) + poster + titoli IT...');
-  const movieItems = await processKind(token, 'movies', 'movie');
-  const seriesItems = await processKind(token, 'shows', 'series');
-  const items = [...movieItems, ...seriesItems];
-  console.log(`totale da scrivere: ${items.length} (film ${movieItems.length}, serie ${seriesItems.length})`);
 
-  if (DRY) {
-    console.log('[DRY] esempio film:', JSON.stringify(movieItems[0], null, 2));
-    console.log('[DRY] esempio serie:', JSON.stringify(seriesItems[0], null, 2));
-    return;
+  const all = [
+    ...(await fetchWatchedNorms(token, 'movies', 'movie')),
+    ...(await fetchWatchedNorms(token, 'shows', 'series'))
+  ];
+
+  let todo = all;
+  if (!FORCE) {
+    const seen = await existingFlaggedIds(authKey);
+    todo = all.filter(n => !seen.has(n.id));
+    console.log(`nuovi da marcare: ${todo.length} (già a posto: ${all.length - todo.length})`);
+  } else {
+    console.log(`--force: riprocesso tutti i ${all.length}`);
   }
+
+  if (!todo.length) { console.log('✅ niente di nuovo, libreria già allineata.'); return; }
+
+  console.log('recupero poster + titoli IT per i nuovi...');
+  const extras = await mapPool(todo, 12, n => cinemetaMeta(n.type, n.id));
+  const itTitles = await mapPool(todo, 3, n => traktItTitle(n.type === 'movie' ? 'movies' : 'shows', n.id, token));
+  const items = todo.map((n, i) => buildItem(n, extras[i] || {}, itTitles[i], n.type));
+
+  if (DRY) { console.log('[DRY] pronti', items.length, 'item nuovi. Esempio:', JSON.stringify(items[0], null, 2)); return; }
 
   const CHUNK = 100;
   let ok = 0;
@@ -189,5 +210,5 @@ async function processKind(token, kind, type) {
     ok += batch.length;
     console.log(`scritti ${ok}/${items.length}`);
   }
-  console.log(`✅ FATTO — ${ok} titoli marcati visti (film + serie). Ricarica Stremio.`);
+  console.log(`✅ FATTO — ${ok} nuovi titoli marcati visti. Ricarica Stremio.`);
 })().catch(e => { console.error('❌ ERRORE:', e.message); process.exit(1); });
