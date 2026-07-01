@@ -1,4 +1,6 @@
 node_modules/
 trakt_token.json
+cache_data.json
+.env
 nohup.out
 *.log

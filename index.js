@@ -127,7 +127,7 @@ async function refreshTraktToken() {
   try {
     const res = await fetch('https://api.trakt.tv/oauth/token', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'User-Agent': 'Mozilla/5.0 (compatible; stremio-trakt-addon/1.0)' },
       body: JSON.stringify({
         refresh_token: refreshToken,
         client_id: TRAKT_CLIENT_ID,
@@ -146,7 +146,7 @@ async function authenticateDeviceFlow() {
   console.log('Avvio autenticazione Trakt (device flow)...');
   const codeRes = await fetch('https://api.trakt.tv/oauth/device/code', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', 'User-Agent': 'Mozilla/5.0 (compatible; stremio-trakt-addon/1.0)' },
     body: JSON.stringify({ client_id: TRAKT_CLIENT_ID })
   });
   if (!codeRes.ok) throw new Error('Errore richiesta device code: ' + codeRes.status);
@@ -162,7 +162,7 @@ async function authenticateDeviceFlow() {
     await new Promise(r => setTimeout(r, pollMs));
     const tokenRes = await fetch('https://api.trakt.tv/oauth/device/token', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'User-Agent': 'Mozilla/5.0 (compatible; stremio-trakt-addon/1.0)' },
       body: JSON.stringify({ code: device_code, client_id: TRAKT_CLIENT_ID, client_secret: TRAKT_CLIENT_SECRET })
     });
     if (tokenRes.status === 200) { saveToken(await tokenRes.json()); console.log('Autenticazione completata!'); return; }
