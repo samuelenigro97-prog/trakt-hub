@@ -21,7 +21,7 @@ const META_CACHE_VERSION = 4; // incrementa quando cambia il formato del meta
 
 const manifest = {
   id: 'it.samuele.trakt.watchlist',
-  version: '1.5.0',
+  version: '1.6.0',
   name: 'Trakt Hub',
   description: 'La tua watchlist Trakt: Da vedere, Scegli per me, aggiungi e segna come visto direttamente da Stremio.',
   resources: ['catalog', 'stream'],
@@ -263,6 +263,86 @@ async function getTraktWatched(type) {
     watchedCache[type] = result.data || [];
     return watchedCache[type];
   } catch (e) { return watchedCache[type] || []; }
+}
+
+// ─── Sync visti → libreria Stremio (pallini viola) ────────────────────────────
+// Porta in Stremio i "visti" segnati su Trakt fuori da Stremio.
+// Gira opportunisticamente quando l'addon riceve richieste (throttle 30 min).
+const STREMIO_AUTHKEY = process.env.STREMIO_AUTHKEY || '';
+let lastWatchedSync = 0;
+const WATCHED_SYNC_INTERVAL = 30 * 60 * 1000;
+
+async function stremioFlaggedIds() {
+  const res = await fetch('https://api.strem.io/api/datastoreGet', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ authKey: STREMIO_AUTHKEY, collection: 'libraryItem', all: true })
+  });
+  const r = (await res.json()).result || [];
+  return new Set(r.filter(i => i.state && i.state.flaggedWatched === 1 && !i.removed).map(i => i._id));
+}
+
+async function syncItTitle(kind, imdb) { // kind: 'movies' | 'shows'
+  try {
+    const r = await traktGet('https://api.trakt.tv/' + kind + '/' + imdb + '/translations/it', null);
+    const arr = r.data || [];
+    return (arr[0] && arr[0].title) ? arr[0].title : null;
+  } catch (e) { return null; }
+}
+
+async function syncPoster(type, imdb) { // type: 'movie' | 'series'
+  try {
+    const r = await fetch('https://v3-cinemeta.strem.io/meta/' + type + '/' + imdb + '.json');
+    if (!r.ok) return {};
+    const m = (await r.json()).meta || {};
+    return { poster: m.poster || '', background: m.background || '' };
+  } catch (e) { return {}; }
+}
+
+function syncLibItem(n, extra, itTitle) {
+  const now = new Date().toISOString();
+  return {
+    _id: n.id, name: itTitle || n.title, type: n.type,
+    poster: extra.poster || '', posterShape: 'poster', background: extra.background || '',
+    year: n.year || '', removed: false, temp: false, _ctime: now, _mtime: now,
+    state: {
+      lastWatched: n.watchedAt || now, timeWatched: 0, timeOffset: 0, overallTimeWatched: 0,
+      timesWatched: n.plays || 1, flaggedWatched: 1, duration: 0, video_id: '', watched: '', noNotif: false, season: 0, episode: 0
+    }
+  };
+}
+
+async function syncWatchedToStremio() {
+  if (!STREMIO_AUTHKEY) return;
+  const norm = (w, type, o) => ({ id: o && o.ids && o.ids.imdb, title: o && o.title, year: o && o.year, plays: w.plays, watchedAt: w.last_watched_at, type, kind: type === 'movie' ? 'movies' : 'shows' });
+  const movies = (await getTraktWatched('movies')).map(w => norm(w, 'movie', w.movie));
+  const shows = (await getTraktWatched('shows')).map(w => norm(w, 'series', w.show));
+  const all = [...movies, ...shows].filter(n => n.id);
+  const seen = await stremioFlaggedIds();
+  const todo = all.filter(n => !seen.has(n.id));
+  if (!todo.length) { console.log('[sync-visti] già allineato'); return; }
+  console.log('[sync-visti] nuovi da marcare:', todo.length);
+  const items = [];
+  for (const n of todo) {
+    const [extra, itTitle] = await Promise.all([syncPoster(n.type, n.id), syncItTitle(n.kind, n.id)]);
+    items.push(syncLibItem(n, extra, itTitle));
+  }
+  for (let i = 0; i < items.length; i += 100) {
+    const res = await fetch('https://api.strem.io/api/datastorePut', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ authKey: STREMIO_AUTHKEY, collection: 'libraryItem', changes: items.slice(i, i + 100) })
+    });
+    const j = await res.json().catch(() => ({}));
+    if (j.error) throw new Error(JSON.stringify(j.error));
+  }
+  console.log('[sync-visti] ✅ marcati', items.length, 'nuovi titoli');
+}
+
+function maybeSyncWatched() {
+  if (!STREMIO_AUTHKEY) return;
+  const now = Date.now();
+  if (now - lastWatchedSync < WATCHED_SYNC_INTERVAL) return;
+  lastWatchedSync = now;
+  syncWatchedToStremio().catch(e => console.warn('[sync-visti]', e.message));
 }
 
 // Rimosse le raccomandazioni Trakt (richiedono premium) → sostituite con TMDB
@@ -945,6 +1025,7 @@ async function main() {
   const builder = new addonBuilder(manifest);
 
   builder.defineCatalogHandler(async ({ type, id, extra }) => {
+    maybeSyncWatched(); // sync opportunistico visti Trakt → libreria (non-bloccante)
     try {
       const skip = parseInt(extra?.skip || 0);
       const genre = extra?.genre || null;
