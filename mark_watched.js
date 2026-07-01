@@ -1,4 +1,4 @@
-// Marca come "visto" nella libreria Stremio tutti i film visti su Trakt.
+// Marca come "visto" nella libreria Stremio tutti i film E le serie visti su Trakt.
 // Legge authKey da ~/.stremio_authkey e il token Trakt da trakt_token.json.
 // Uso: node mark_watched.js [--dry]
 const fs = require('fs');
@@ -49,11 +49,27 @@ async function ensureFreshToken() {
   return tok.access_token;
 }
 
-async function traktWatchedMovies(token) {
-  const res = await fetch(`https://api.trakt.tv/users/${TRAKT_USER}/watched/movies`, {
-    headers: { 'trakt-api-version': '2', 'trakt-api-key': TRAKT_CID, 'Authorization': 'Bearer ' + token, 'User-Agent': UA }
-  });
-  if (!res.ok) throw new Error('Trakt watched/movies HTTP ' + res.status);
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+// GET Trakt con retry sul 429 (rispetta Retry-After).
+async function traktGet(url, token, tries = 5) {
+  for (let a = 0; a < tries; a++) {
+    const res = await fetch(url, {
+      headers: { 'trakt-api-version': '2', 'trakt-api-key': TRAKT_CID, 'Authorization': 'Bearer ' + token, 'User-Agent': UA }
+    });
+    if (res.status === 429) {
+      const wait = (parseInt(res.headers.get('retry-after')) || 2) * 1000 + 500;
+      await sleep(wait);
+      continue;
+    }
+    return res;
+  }
+  throw new Error('Trakt 429 persistente: ' + url);
+}
+
+async function traktWatched(token, kind) { // kind: 'movies' | 'shows'
+  const res = await traktGet(`https://api.trakt.tv/users/${TRAKT_USER}/watched/${kind}`, token);
+  if (!res.ok) throw new Error(`Trakt watched/${kind} HTTP ` + res.status);
   return res.json();
 }
 
@@ -71,24 +87,28 @@ async function mapPool(items, limit, fn) {
   return out;
 }
 
-async function traktItTitle(imdb, token) {
+async function traktItTitle(kind, imdb, token) { // kind: 'movies' | 'shows'
   try {
-    const r = await fetch(`https://api.trakt.tv/movies/${imdb}/translations/it`, {
-      headers: { 'trakt-api-version': '2', 'trakt-api-key': TRAKT_CID, 'Authorization': 'Bearer ' + token, 'User-Agent': UA }
-    });
+    const r = await traktGet(`https://api.trakt.tv/${kind}/${imdb}/translations/it`, token);
     if (!r.ok) return null;
     const arr = await r.json();
     return (arr && arr[0] && arr[0].title) ? arr[0].title : null;
   } catch (e) { return null; }
 }
 
-async function cinemetaPoster(imdb) {
+async function cinemetaMeta(type, imdb) { // type: 'movie' | 'series'
   try {
-    const r = await fetch(`https://v3-cinemeta.strem.io/meta/movie/${imdb}.json`, { headers: { 'User-Agent': UA } });
+    const r = await fetch(`https://v3-cinemeta.strem.io/meta/${type}/${imdb}.json`, { headers: { 'User-Agent': UA } });
     if (!r.ok) return {};
     const m = (await r.json()).meta || {};
     return { poster: m.poster || '', background: m.background || '', logo: m.logo || '' };
   } catch (e) { return {}; }
+}
+
+// item watched di Trakt (movie o show) → campi comuni
+function normalize(w, kind) {
+  const o = kind === 'movies' ? w.movie : w.show;
+  return { id: o?.ids?.imdb, title: o?.title, year: o?.year, plays: w.plays, watchedAt: w.last_watched_at };
 }
 
 async function datastorePut(authKey, changes) {
@@ -101,57 +121,63 @@ async function datastorePut(authKey, changes) {
   return j;
 }
 
-function buildItem(movie, extra, itTitle) {
-  const m = movie.movie;
-  const id = m.ids.imdb;
+function buildItem(norm, extra, itTitle, type) { // type: 'movie' | 'series'
   const now = new Date().toISOString();
-  const watchedAt = movie.last_watched_at || now;
   return {
-    _id: id,
-    name: itTitle || m.title,
-    type: 'movie',
+    _id: norm.id,
+    name: itTitle || norm.title,
+    type,
     poster: extra.poster || '',
     posterShape: 'poster',
     background: extra.background || '',
     logo: extra.logo || '',
-    year: m.year || '',
+    year: norm.year || '',
     removed: false,
     temp: false,
     _ctime: now,
     _mtime: now,
     state: {
-      lastWatched: watchedAt,
+      lastWatched: norm.watchedAt || now,
       timeWatched: 0,
       timeOffset: 0,
       overallTimeWatched: 0,
-      timesWatched: movie.plays || 1,
+      timesWatched: norm.plays || 1,
       flaggedWatched: 1,
       duration: 0,
       video_id: '',
       watched: '',
-      noNotif: false
+      noNotif: false,
+      season: 0,
+      episode: 0
     }
   };
+}
+
+// kind = 'movies'|'shows' (Trakt), type = 'movie'|'series' (Stremio)
+async function processKind(token, kind, type) {
+  const label = type === 'movie' ? 'film' : 'serie';
+  const norms = (await traktWatched(token, kind)).map(w => normalize(w, kind));
+  const withImdb = norms.filter(n => n.id);
+  const skipped = norms.filter(n => !n.id);
+  console.log(`${label}: ${norms.length} visti | mappabili ${withImdb.length} | saltati (no IMDb) ${skipped.length}`);
+  if (skipped.length) skipped.forEach(n => console.log(`  SKIP (${label}):`, n.title));
+  const extras = await mapPool(withImdb, 12, n => cinemetaMeta(type, n.id));
+  const itTitles = await mapPool(withImdb, 3, n => traktItTitle(kind, n.id, token));
+  return withImdb.map((n, i) => buildItem(n, extras[i] || {}, itTitles[i], type));
 }
 
 (async () => {
   const authKey = readAuthKey();
   const token = await ensureFreshToken();
-  const watched = await traktWatchedMovies(token);
-  console.log('film visti su Trakt:', watched.length);
-
-  const withImdb = watched.filter(w => w.movie?.ids?.imdb);
-  const skipped = watched.filter(w => !w.movie?.ids?.imdb);
-  console.log('con IMDb (mappabili):', withImdb.length, '| saltati (no IMDb):', skipped.length);
-  if (skipped.length) skipped.forEach(w => console.log('  SKIP:', w.movie?.title));
-
-  console.log('recupero poster + titoli IT...');
-  const extras = await mapPool(withImdb, 12, w => cinemetaPoster(w.movie.ids.imdb));
-  const itTitles = await mapPool(withImdb, 8, w => traktItTitle(w.movie.ids.imdb, token));
-  const items = withImdb.map((w, i) => buildItem(w, extras[i] || {}, itTitles[i]));
+  console.log('recupero visti (film + serie) + poster + titoli IT...');
+  const movieItems = await processKind(token, 'movies', 'movie');
+  const seriesItems = await processKind(token, 'shows', 'series');
+  const items = [...movieItems, ...seriesItems];
+  console.log(`totale da scrivere: ${items.length} (film ${movieItems.length}, serie ${seriesItems.length})`);
 
   if (DRY) {
-    console.log('[DRY] pronti', items.length, 'item. Esempio:', JSON.stringify(items[0], null, 2));
+    console.log('[DRY] esempio film:', JSON.stringify(movieItems[0], null, 2));
+    console.log('[DRY] esempio serie:', JSON.stringify(seriesItems[0], null, 2));
     return;
   }
 
@@ -163,5 +189,5 @@ function buildItem(movie, extra, itTitle) {
     ok += batch.length;
     console.log(`scritti ${ok}/${items.length}`);
   }
-  console.log('✅ FATTO —', ok, 'film marcati visti. Ricarica Stremio.');
+  console.log(`✅ FATTO — ${ok} titoli marcati visti (film + serie). Ricarica Stremio.`);
 })().catch(e => { console.error('❌ ERRORE:', e.message); process.exit(1); });
