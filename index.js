@@ -15,13 +15,16 @@ const CACHE_FILE = path.join(__dirname, 'cache_data.json');
 const PORT = parseInt(process.env.PORT || '7779');
 const ADDON_URL = (process.env.ADDON_URL || 'http://192.168.178.188:7779').replace(/\/$/, '');
 const CLEAR_CACHE_TOKEN = process.env.CLEAR_CACHE_TOKEN || '';
+const GIST_TOKEN = process.env.GITHUB_GIST_TOKEN || ''; // PAT GitHub con scope gist
+const GIST_ID = process.env.GITHUB_GIST_ID || '';       // id della gist segreta che tiene il token
+const GIST_FILENAME = 'trakt_token.json';
 const CACHE_TTL = 60 * 1000; // 1 minuto
 const META_CACHE_TTL = 24 * 60 * 60 * 1000; // 24 ore
 const META_CACHE_VERSION = 4; // incrementa quando cambia il formato del meta
 
 const manifest = {
   id: 'it.samuele.trakt.watchlist',
-  version: '1.6.1',
+  version: '1.7.0',
   name: 'Trakt Hub',
   description: 'La tua watchlist Trakt: Da vedere, Scegli per me, aggiungi e segna come visto direttamente da Stremio.',
   resources: ['catalog', 'stream'],
@@ -93,21 +96,54 @@ function loadCacheFromDisk() {
 
 // ─── Token ───────────────────────────────────────────────────────────────────
 
-function loadToken() {
-  // File prima: ha il token più recente dopo ogni refresh
+const GIST_UA = 'Mozilla/5.0 (compatible; stremio-trakt-addon/1.0)';
+
+async function gistLoad() {
+  if (!GIST_TOKEN || !GIST_ID) return null;
+  try {
+    const r = await fetch('https://api.github.com/gists/' + GIST_ID, {
+      headers: { Authorization: 'Bearer ' + GIST_TOKEN, 'User-Agent': GIST_UA, Accept: 'application/vnd.github+json' }
+    });
+    if (!r.ok) { console.warn('[gist] load HTTP ' + r.status); return null; }
+    const j = await r.json();
+    const content = j.files && j.files[GIST_FILENAME] && j.files[GIST_FILENAME].content;
+    return content ? JSON.parse(content) : null;
+  } catch (e) { console.warn('[gist] load errore:', e.message); return null; }
+}
+
+async function gistSave(tokenData) {
+  if (!GIST_TOKEN || !GIST_ID) return;
+  try {
+    const r = await fetch('https://api.github.com/gists/' + GIST_ID, {
+      method: 'PATCH',
+      headers: { Authorization: 'Bearer ' + GIST_TOKEN, 'User-Agent': GIST_UA, Accept: 'application/vnd.github+json', 'Content-Type': 'application/json' },
+      body: JSON.stringify({ files: { [GIST_FILENAME]: { content: JSON.stringify(tokenData, null, 2) } } })
+    });
+    if (!r.ok) console.warn('[gist] save HTTP ' + r.status);
+  } catch (e) { console.warn('[gist] save errore:', e.message); }
+}
+
+function applyToken(data, src) {
+  accessToken = data.access_token;
+  refreshToken = data.refresh_token || null;
+  if (data.created_at && data.expires_in) tokenExpiresAt = (data.created_at + data.expires_in) * 1000;
+  console.log('Token Trakt caricato da ' + src);
+}
+
+// Ordine: file locale → gist (sopravvive ai restart Render) → env (primo avvio).
+async function loadToken() {
   try {
     if (fs.existsSync(TOKEN_FILE)) {
       const data = JSON.parse(fs.readFileSync(TOKEN_FILE, 'utf8'));
-      if (data.access_token) {
-        accessToken = data.access_token;
-        refreshToken = data.refresh_token || null;
-        if (data.created_at && data.expires_in) tokenExpiresAt = (data.created_at + data.expires_in) * 1000;
-        console.log('Token Trakt caricato da file');
-        return true;
-      }
+      if (data.access_token) { applyToken(data, 'file'); return true; }
     }
   } catch (e) {}
-  // Fallback: env var (primo avvio su Render, prima ancora del primo refresh)
+  const g = await gistLoad();
+  if (g && g.access_token) {
+    applyToken(g, 'gist');
+    try { fs.writeFileSync(TOKEN_FILE, JSON.stringify(g, null, 2)); } catch (e) {}
+    return true;
+  }
   if (process.env.TRAKT_ACCESS_TOKEN) {
     accessToken = process.env.TRAKT_ACCESS_TOKEN;
     refreshToken = process.env.TRAKT_REFRESH_TOKEN || null;
@@ -118,11 +154,11 @@ function loadToken() {
 }
 
 function saveToken(tokenData) {
-  // Salva sempre su file così il token refreshato sopravvive ai riavvii
   try { fs.writeFileSync(TOKEN_FILE, JSON.stringify(tokenData, null, 2)); } catch (e) {}
   accessToken = tokenData.access_token;
   refreshToken = tokenData.refresh_token || refreshToken;
   if (tokenData.created_at && tokenData.expires_in) tokenExpiresAt = (tokenData.created_at + tokenData.expires_in) * 1000;
+  gistSave(tokenData); // fire-and-forget: il token rinnovato sopravvive ai restart
 }
 
 // Refresh proattivo: rinnova il token PRIMA che scada (evita finestre di catalogo vuoto).
@@ -1005,7 +1041,7 @@ function startKeepAlive() {
 
 async function main() {
   loadCacheFromDisk();
-  if (!loadToken()) {
+  if (!(await loadToken())) {
     if (process.env.RENDER) throw new Error('Token mancante: imposta TRAKT_ACCESS_TOKEN nelle env vars di Render.');
     await authenticateDeviceFlow();
   }
