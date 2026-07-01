@@ -1,0 +1,20 @@
+name: heartbeat
+# Commit vuoto mensile: tiene il repo "attivo" così GitHub non disabilita mai
+# i workflow schedulati (regola dei 60 giorni di inattività). Auto-sostenuto.
+on:
+  schedule:
+    - cron: '0 3 1 * *'   # ogni 1° del mese alle 03:00 UTC
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  commit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: empty commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git commit --allow-empty -m "chore: heartbeat (mantiene vivi i workflow schedulati)"
+          git push
