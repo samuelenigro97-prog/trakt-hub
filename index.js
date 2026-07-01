@@ -18,7 +18,7 @@ const META_CACHE_VERSION = 4; // incrementa quando cambia il formato del meta
 
 const manifest = {
   id: 'it.samuele.trakt.watchlist',
-  version: '1.4.1',
+  version: '1.5.0',
   name: 'Trakt Hub',
   description: 'La tua watchlist Trakt: Da vedere, Scegli per me, aggiungi e segna come visto direttamente da Stremio.',
   resources: ['catalog', 'stream'],
@@ -38,6 +38,7 @@ const manifest = {
 
 let accessToken = null;
 let refreshToken = null;
+let tokenExpiresAt = 0; // epoch ms di scadenza access token (0 = sconosciuto)
 
 // cache[type] = { metas: [...], ts: Date.now() }
 const cache = {};
@@ -97,6 +98,7 @@ function loadToken() {
       if (data.access_token) {
         accessToken = data.access_token;
         refreshToken = data.refresh_token || null;
+        if (data.created_at && data.expires_in) tokenExpiresAt = (data.created_at + data.expires_in) * 1000;
         console.log('Token Trakt caricato da file');
         return true;
       }
@@ -117,6 +119,21 @@ function saveToken(tokenData) {
   try { fs.writeFileSync(TOKEN_FILE, JSON.stringify(tokenData, null, 2)); } catch (e) {}
   accessToken = tokenData.access_token;
   refreshToken = tokenData.refresh_token || refreshToken;
+  if (tokenData.created_at && tokenData.expires_in) tokenExpiresAt = (tokenData.created_at + tokenData.expires_in) * 1000;
+}
+
+// Refresh proattivo: rinnova il token PRIMA che scada (evita finestre di catalogo vuoto).
+// Controlla ogni ora; rinnova se manca meno di 24h alla scadenza.
+function scheduleProactiveRefresh() {
+  const CHECK = 60 * 60 * 1000;      // 1 ora
+  const MARGIN = 24 * 60 * 60 * 1000; // 24 ore prima della scadenza
+  setInterval(async () => {
+    if (!refreshToken || !tokenExpiresAt) return;
+    if (Date.now() > tokenExpiresAt - MARGIN) {
+      console.log('[refresh proattivo] token vicino a scadenza, rinnovo...');
+      await refreshTraktToken();
+    }
+  }, CHECK).unref();
 }
 
 async function refreshTraktToken() {
@@ -906,6 +923,7 @@ async function main() {
     if (process.env.RENDER) throw new Error('Token mancante: imposta TRAKT_ACCESS_TOKEN nelle env vars di Render.');
     await authenticateDeviceFlow();
   }
+  scheduleProactiveRefresh();
 
   // Warm-up: carica cataloghi e pre-fetcha tutti i meta in background
   setTimeout(async () => {
