@@ -21,7 +21,7 @@ const META_CACHE_VERSION = 4; // incrementa quando cambia il formato del meta
 
 const manifest = {
   id: 'it.samuele.trakt.watchlist',
-  version: '1.6.0',
+  version: '1.6.1',
   name: 'Trakt Hub',
   description: 'La tua watchlist Trakt: Da vedere, Scegli per me, aggiungi e segna come visto direttamente da Stremio.',
   resources: ['catalog', 'stream'],
@@ -337,12 +337,15 @@ async function syncWatchedToStremio() {
   console.log('[sync-visti] ✅ marcati', items.length, 'nuovi titoli');
 }
 
+let syncInFlight = false;
 function maybeSyncWatched() {
-  if (!STREMIO_AUTHKEY) return;
-  const now = Date.now();
-  if (now - lastWatchedSync < WATCHED_SYNC_INTERVAL) return;
-  lastWatchedSync = now;
-  syncWatchedToStremio().catch(e => console.warn('[sync-visti]', e.message));
+  if (!STREMIO_AUTHKEY || syncInFlight) return;
+  if (Date.now() - lastWatchedSync < WATCHED_SYNC_INTERVAL) return;
+  syncInFlight = true;
+  syncWatchedToStremio()
+    .then(() => { lastWatchedSync = Date.now(); }) // throttle solo su successo → i fallimenti riprovano
+    .catch(e => console.warn('[sync-visti]', e.message))
+    .finally(() => { syncInFlight = false; });
 }
 
 // Rimosse le raccomandazioni Trakt (richiedono premium) → sostituite con TMDB
