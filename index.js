@@ -379,6 +379,27 @@ function syncLibItem(n, extra, itTitle, watchedStr, fully) {
   };
 }
 
+// Set di imdb id attualmente in watchlist Trakt (movies + shows), lettura fresca senza ETag
+async function getWatchlistImdbSet() {
+  const set = new Set();
+  for (const type of ['movies', 'shows']) {
+    let page = 1;
+    while (true) {
+      const url = 'https://api.trakt.tv/users/' + TRAKT_USER + '/watchlist/' + type + '?limit=500&page=' + page;
+      const res = await traktGet(url, null);
+      const items = res.data || [];
+      for (const it of items) {
+        const o = it.movie || it.show;
+        const imdb = o && o.ids && o.ids.imdb;
+        if (imdb) set.add(imdb);
+      }
+      if (items.length < 500) break;
+      page++;
+    }
+  }
+  return set;
+}
+
 async function syncWatchedToStremio() {
   if (!STREMIO_AUTHKEY) return;
   const norm = (w, type, o) => ({ id: o && o.ids && o.ids.imdb, title: o && o.title, year: o && o.year, plays: w.plays, watchedAt: w.last_watched_at, seasons: w.seasons, type, kind: type === 'movie' ? 'movies' : 'shows' });
@@ -397,8 +418,7 @@ async function syncWatchedToStremio() {
     const stored = cur && cur.state ? watchedPopcount(cur.state.watched) : 0;
     return !cur || stored !== traktEpCount(n);
   });
-  if (!todo.length) { console.log('[sync-visti] già allineato'); return; }
-  console.log('[sync-visti] da aggiornare:', todo.length);
+  if (todo.length) console.log('[sync-visti] da aggiornare:', todo.length);
 
   const items = [];
   for (const n of todo) {
@@ -410,6 +430,28 @@ async function syncWatchedToStremio() {
       items.push(syncLibItem(n, extra, itTitle, '', true));
     }
   }
+
+  // Un-mark self-healing: film in watchlist Trakt ma flaggati visti in Stremio → azzera pallino.
+  // La watchlist ("da vedere") vince sulla contraddizione. Un visto reale va segnato su Trakt
+  // (finisce in watched history → esce dalla watchlist → non viene azzerato).
+  try {
+    const wlSet = await getWatchlistImdbSet();
+    const watchedSet = new Set(all.map(n => n.id));
+    const nowIso = new Date().toISOString();
+    for (const [id, cur] of lib) {
+      if (!id || !id.startsWith('tt')) continue;
+      if (!wlSet.has(id) || watchedSet.has(id)) continue;
+      if (!(cur.state && cur.state.flaggedWatched === 1)) continue;
+      cur.state.flaggedWatched = 0;
+      cur.state.timesWatched = 0;
+      cur.state.overallTimeWatched = 0;
+      cur._mtime = nowIso;
+      items.push(cur);
+      console.log('[sync-visti] un-mark watchlist:', cur.name, id);
+    }
+  } catch (e) { console.warn('[sync-visti] un-mark fallito:', e.message); }
+
+  if (!items.length) { console.log('[sync-visti] già allineato'); return; }
   for (let i = 0; i < items.length; i += 100) {
     const res = await fetch('https://api.strem.io/api/datastorePut', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
