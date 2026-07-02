@@ -1125,7 +1125,12 @@ async function main() {
       return { metas };
     } catch (e) {
       console.error('Errore catalogo:', e.message);
-      return { metas: [] };
+      // Resilienza: su errore servi l'ultima cache buona invece di un catalogo vuoto.
+      const fallback = cache[id]?.metas
+        || cache['trakt-' + (type === 'movie' ? 'movies' : 'series')]?.metas
+        || [];
+      console.warn('[fallback] servo ' + fallback.length + ' elementi in cache per ' + id);
+      return { metas: fallback };
     }
   });
 
