@@ -1286,7 +1286,9 @@ a{color:${color};text-decoration:none;font-size:.9rem}</style></head>
       hasToken: !!accessToken,
       gistConfigured: !!(GIST_TOKEN && GIST_ID),
       stremioSyncConfigured: !!STREMIO_AUTHKEY,
-      tokenExpiresInDays: tokenExpiresAt ? Math.round((tokenExpiresAt - Date.now()) / 86400000 * 10) / 10 : null
+      tokenExpiresInDays: tokenExpiresAt ? Math.round((tokenExpiresAt - Date.now()) / 86400000 * 10) / 10 : null,
+      uptimeSeconds: Math.round(process.uptime()),
+      cachedCatalogs: Object.keys(cache).length
     });
   });
 
