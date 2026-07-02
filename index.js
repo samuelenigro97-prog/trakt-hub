@@ -1158,9 +1158,14 @@ async function main() {
     try {
       const skip = parseInt(extra?.skip || 0);
       const genre = extra?.genre || null;
-      const forHome = id.includes('random') && skip === 0 && !genre;
+      // Home view (prima pagina, nessun genere selezionato): mostra 1 film per genere,
+      // sia per "Scegli per me" (random) sia per "Da vedere" (watchlist principale).
+      // Multi-genere: film assegnato a UN solo genere casuale, niente doppioni (buildRandom forHome).
+      // Con un genere selezionato dai chip → lista completa filtrata (forHome=false).
+      const isMainWatchlist = id === 'trakt-movies' || id === 'trakt-series';
+      const forHome = (id.includes('random') || isMainWatchlist) && skip === 0 && !genre;
       let allMetas = forHome
-        ? await buildRandom(type, genre, true)
+        ? await buildRandom(type, null, true)
         : await getCatalogCached(id, type, genre);
       if (genre && !id.includes('random')) allMetas = allMetas.filter(m => m.genres && m.genres.includes(genre));
       const metas = forHome ? allMetas : allMetas.slice(skip, skip + 100);
