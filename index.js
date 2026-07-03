@@ -1169,6 +1169,10 @@ async function main() {
       // Con un genere selezionato dai chip → lista completa filtrata (forHome=false).
       const isMainWatchlist = id === 'trakt-movies' || id === 'trakt-series';
       const forHome = (id.includes('random') || isMainWatchlist) && skip === 0 && !genre;
+      // "Da vedere" senza genere = solo il sampler 1-per-genere, niente paginazione:
+      // così anche la board aperta resta a ~1 film per genere e non si allunga con
+      // tutta la watchlist. La lista completa di un genere si vede coi chip genere.
+      if (isMainWatchlist && !genre && skip > 0) return { metas: [] };
       let allMetas = forHome
         ? await buildRandom(type, null, true)
         : await getCatalogCached(id, type, genre);
