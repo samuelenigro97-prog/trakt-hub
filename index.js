@@ -707,7 +707,7 @@ async function buildMeta(type, stremioId) {
     .filter(v => v.site === 'YouTube' && v.type === 'Trailer' && v.official)
     .sort((a, b) => new Date(b.published_at) - new Date(a.published_at))[0]?.key;
   const trailerKey = pickTrailer(it?.videos) || pickTrailer(en?.videos);
-  const trailers = trailerKey ? [{ source: trailerKey, type: 'Trailer' }] : [];
+  const trailerStreams = trailerKey ? [{ ytId: trailerKey, title: 'Trailer' }] : [];
 
   // Episodi + poster stagione corrente per le serie
   // Episodi: risposta immediata da episode_count, titoli reali in background
@@ -793,7 +793,7 @@ async function buildMeta(type, stremioId) {
     description: overview,
     genres:      (it?.genres || en?.genres || []).map(g => g.name),
     imdbRating:  base.vote_average ? String(base.vote_average.toFixed(1)) : undefined,
-    year, cast, director, writer, runtime, trailers, links,
+    year, cast, director, writer, runtime, trailerStreams, links,
     ...(videos.length ? { videos } : {})
   };
 }
