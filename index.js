@@ -1167,12 +1167,12 @@ async function main() {
       // sia per "Scegli per me" (random) sia per "Da vedere" (watchlist principale).
       // Multi-genere: film assegnato a UN solo genere casuale, niente doppioni (buildRandom forHome).
       // Con un genere selezionato dai chip → lista completa filtrata (forHome=false).
-      const isMainWatchlist = id === 'trakt-movies' || id === 'trakt-series';
-      const forHome = (id.includes('random') || isMainWatchlist) && skip === 0 && !genre;
-      // "Da vedere" e "Scegli per me" senza genere = solo il sampler 1-per-genere,
-      // niente paginazione: così anche la board aperta resta a ~1 film per genere e
-      // non si allunga. La lista completa di un genere si vede coi chip genere.
-      if ((isMainWatchlist || id.includes('random')) && !genre && skip > 0) return { metas: [] };
+      const forHome = id.includes('random') && skip === 0 && !genre;
+      // Solo "Scegli per me" (random) senza genere = sampler 1-per-genere senza
+      // paginazione, altrimenti scrolli all'infinito con random ripetuti.
+      // "Da vedere" invece carica tutta la watchlist normalmente (paginata).
+      // Chip genere = lista completa filtrata (per entrambi).
+      if (id.includes('random') && !genre && skip > 0) return { metas: [] };
       let allMetas = forHome
         ? await buildRandom(type, null, true)
         : await getCatalogCached(id, type, genre);
