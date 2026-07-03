@@ -887,7 +887,7 @@ async function buildCatalog(type) {
       if (obj.ids.tmdb) watchedTmdb.add(obj.ids.tmdb);
     } else {
       const aired = airedByImdb.get(obj.ids.imdb) || airedByTmdb.get(obj.ids.tmdb) || 0;
-      const seen = (w.seasons || []).reduce((tot, s) => tot + s.episodes.length, 0);
+      const seen = (w.seasons || []).reduce((tot, s) => tot + (s.episodes || []).length, 0);
       const seasonsWatched = (w.seasons || []).filter(s => s.number > 0);
       const isComplete = (aired > 0 && seen >= aired) || (aired === 0 && seasonsWatched.length > 0 && seen >= 6);
       if (isComplete) {
@@ -897,8 +897,13 @@ async function buildCatalog(type) {
     }
   }
 
-  // Auto-cleanup in background (max 1 volta/ora)
-  autoCleanupWatched(type, items, watchedImdb, watchedTmdb);
+  // Auto-cleanup DISATTIVATO: l'integrazione nativa Stremio↔Trakt è ora la fonte
+  // di verità dei visti. autoCleanupWatched cancellava da Trakt history i titoli
+  // ancora in watchlist, ma col nativo che scrobbla in tempo reale questo cancellava
+  // visioni legittime (i due sistemi si pestavano i piedi). Il flusso normale è:
+  // vedi → nativo segna watched → Trakt esce da watchlist da solo.
+  // Per riattivarlo togliere il commento (solo se si disabilita il sync nativo).
+  // autoCleanupWatched(type, items, watchedImdb, watchedTmdb);
 
   items.sort((a, b) => new Date(b.listed_at) - new Date(a.listed_at));
 
