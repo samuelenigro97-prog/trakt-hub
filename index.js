@@ -277,6 +277,23 @@ async function traktGet(url, etagKey) {
   return { data: await res.json() };
 }
 
+// POST verso Trakt con retry automatico su 401 (refresh token), come traktGet.
+// Usato per le azioni di scrittura (watchlist add/remove, history) così non
+// falliscono se l'access token è scaduto proprio al momento dell'azione.
+async function traktWrite(url, body) {
+  const build = () => ({
+    method: 'POST',
+    headers: { ...traktHeaders(), 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  });
+  let res = await fetch(url, build());
+  if (res.status === 401) {
+    console.warn('[traktWrite] 401 su ' + url + ' — rinnovo token e riprovo...');
+    if (await refreshTraktToken()) res = await fetch(url, build());
+  }
+  return res;
+}
+
 async function getTraktWatchlist(type) {
   const firstUrl = 'https://api.trakt.tv/users/' + TRAKT_USER + '/watchlist/' + type + '?limit=500&page=1&sort_by=listed_at&sort_how=desc';
   const first = await traktGet(firstUrl, 'watchlist-' + type);
@@ -1219,17 +1236,7 @@ async function main() {
     const ids = imdbId ? { imdb: imdbId } : { tmdb: parseInt(tmdbId) };
     const body = traktType === 'movies' ? { movies: [{ ids }] } : { shows: [{ ids }] };
     const endpoint = 'https://api.trakt.tv/sync/watchlist' + (action === 'remove' ? '/remove' : '');
-    const res = await fetch(endpoint, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'trakt-api-version': '2',
-        'trakt-api-key': TRAKT_CLIENT_ID,
-        'Authorization': 'Bearer ' + accessToken,
-        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-      },
-      body: JSON.stringify(body)
-    });
+    const res = await traktWrite(endpoint, body);
     if (!res.ok) {
       const text = await res.text().catch(() => '');
       console.error('[traktAction] ' + action + ' failed:', res.status, text.slice(0, 200));
@@ -1292,17 +1299,7 @@ a{color:${color};text-decoration:none;font-size:.9rem}</style></head>
       const body = type === 'movies'
         ? { movies: [{ ids, watched_at: new Date().toISOString() }] }
         : { shows: [{ ids, watched_at: new Date().toISOString() }] };
-      const r = await fetch('https://api.trakt.tv/sync/history', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'trakt-api-version': '2',
-          'trakt-api-key': TRAKT_CLIENT_ID,
-          'Authorization': 'Bearer ' + accessToken,
-          'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-        },
-        body: JSON.stringify(body)
-      });
+      const r = await traktWrite('https://api.trakt.tv/sync/history', body);
       if (r.ok) {
         // Invalida catalogo e meta così sparisce dal Da vedere
         const catalogId = 'trakt-' + (type === 'movies' ? 'movies' : 'series');
