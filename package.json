@@ -1,5 +1,6 @@
 {
-  "name": "stremio-trakt-addon",
+  "name": "trakt-hub",
+  "description": "Trakt Hub - addon Stremio per watchlist, da vedere, in arrivo e scegli per me collegati a Trakt",
   "version": "1.0.0",
   "main": "index.js",
   "scripts": {
