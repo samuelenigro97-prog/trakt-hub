@@ -26,7 +26,7 @@ const META_CACHE_VERSION = 4; // incrementa quando cambia il formato del meta
 
 const manifest = {
   id: 'it.samuele.trakt.watchlist',
-  version: '1.9.0',
+  version: '1.9.1',
   name: 'Trakt Hub',
   description: 'La tua watchlist Trakt: Da vedere, Scegli per me, aggiungi e segna come visto direttamente da Stremio.',
   resources: ['catalog', 'stream'],
@@ -1055,7 +1055,9 @@ async function buildRandom(type, genre, forHome = false) {
   if (!source.length) return [];
 
   if (forHome) {
-    // Un film casuale per genere — home view
+    // Home view: 1 titolo casuale per genere per i film, 2 per le serie
+    // (la watchlist serie copre meno generi, altrimenti la riga resta corta)
+    const perGenre = type === 'series' ? 2 : 1;
     const byGenre = {};
     for (const m of source) {
       for (const g of (m.genres || [])) {
@@ -1066,11 +1068,13 @@ async function buildRandom(type, genre, forHome = false) {
     const seen = new Set();
     const picks = [];
     for (const g of Object.keys(byGenre).sort(() => Math.random() - 0.5)) {
-      const candidates = byGenre[g].filter(m => !seen.has(m.id));
-      if (!candidates.length) continue;
-      const pick = candidates[Math.floor(Math.random() * candidates.length)];
-      picks.push(pick);
-      seen.add(pick.id);
+      for (let i = 0; i < perGenre; i++) {
+        const candidates = byGenre[g].filter(m => !seen.has(m.id));
+        if (!candidates.length) break;
+        const pick = candidates[Math.floor(Math.random() * candidates.length)];
+        picks.push(pick);
+        seen.add(pick.id);
+      }
     }
     return picks;
   }
