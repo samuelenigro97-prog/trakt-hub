@@ -22,11 +22,11 @@ const GIST_ID = process.env.GITHUB_GIST_ID || '';       // id della gist segreta
 const GIST_FILENAME = 'trakt_token.json';
 const CACHE_TTL = 60 * 1000; // 1 minuto
 const META_CACHE_TTL = 24 * 60 * 60 * 1000; // 24 ore
-const META_CACHE_VERSION = 4; // incrementa quando cambia il formato del meta
+const META_CACHE_VERSION = 5; // incrementa quando cambia il formato del meta
 
 const manifest = {
   id: 'it.samuele.trakt.watchlist',
-  version: '1.9.1',
+  version: '1.9.2',
   name: 'Trakt Hub',
   description: 'La tua watchlist Trakt: Da vedere, Scegli per me, aggiungi e segna come visto direttamente da Stremio.',
   resources: ['catalog', 'stream'],
@@ -593,6 +593,25 @@ async function translateToItalian(text) {
   } catch (e) { return text; }
 }
 
+// Voto IMDb reale da Cinemeta: il vote_average di TMDB è un'altra scala e
+// non coincide col voto IMDb mostrato nella scheda del titolo.
+const imdbRatingCache = new Map();
+const IMDB_RATING_TTL = 7 * 24 * 60 * 60 * 1000; // 7 giorni
+
+async function fetchImdbRating(imdbId, stremioType) { // stremioType: 'movie' | 'series'
+  if (!imdbId) return null;
+  const key = stremioType + ':' + imdbId;
+  const hit = imdbRatingCache.get(key);
+  if (hit && (Date.now() - hit.ts) < IMDB_RATING_TTL) return hit.rating;
+  try {
+    const res = await tmdbFetch('https://v3-cinemeta.strem.io/meta/' + stremioType + '/' + imdbId + '.json', 5000);
+    if (!res?.ok) return null;
+    const rating = (await res.json())?.meta?.imdbRating || null;
+    imdbRatingCache.set(key, { rating, ts: Date.now() });
+    return rating;
+  } catch (e) { return null; }
+}
+
 async function enrichWithTMDB(imdbId, traktType, tmdbId) {
   try {
     const tmdbType = traktType === 'movies' ? 'movie' : 'tv';
@@ -607,9 +626,10 @@ async function enrichWithTMDB(imdbId, traktType, tmdbId) {
     }
     if (!id) return null;
     const appendIt = tmdbType === 'movie' ? 'images,release_dates' : 'images';
-    const [itRes, enRes] = await Promise.all([
+    const [itRes, enRes, imdbRating] = await Promise.all([
       fetch('https://api.themoviedb.org/3/' + tmdbType + '/' + id + '?language=it-IT&append_to_response=' + appendIt + '&include_image_language=it,en,null&api_key=' + TMDB_KEY),
-      fetch('https://api.themoviedb.org/3/' + tmdbType + '/' + id + '?language=en-US&api_key=' + TMDB_KEY)
+      fetch('https://api.themoviedb.org/3/' + tmdbType + '/' + id + '?language=en-US&api_key=' + TMDB_KEY),
+      fetchImdbRating(imdbId, tmdbType === 'movie' ? 'movie' : 'series')
     ]);
     const it = itRes.ok ? await itRes.json() : null;
     const en = enRes.ok ? await enRes.json() : null;
@@ -627,6 +647,7 @@ async function enrichWithTMDB(imdbId, traktType, tmdbId) {
       overview: it?.overview?.trim() || en?.overview?.trim() || '',
       poster_path, backdrop_path,
       genres:       (it?.genres || en?.genres || []).map(g => g.name),
+      imdb_rating:  imdbRating,
       vote_average: (it || en)?.vote_average,
       release_date: bestReleaseDate(it, tmdbType)
     };
@@ -654,9 +675,10 @@ async function buildMeta(type, stremioId) {
     if (!results || !results[0]) return null;
     tmdbId = results[0].id;
   }
-  const [itRes, enRes] = await Promise.all([
+  const [itRes, enRes, cinemetaRating] = await Promise.all([
     tmdbFetch('https://api.themoviedb.org/3/' + tmdbType + '/' + tmdbId + '?language=it-IT&append_to_response=credits,images,videos&include_image_language=it,en,null&api_key=' + TMDB_KEY),
-    tmdbFetch('https://api.themoviedb.org/3/' + tmdbType + '/' + tmdbId + '?language=en-US&append_to_response=credits,videos&api_key=' + TMDB_KEY)
+    tmdbFetch('https://api.themoviedb.org/3/' + tmdbType + '/' + tmdbId + '?language=en-US&append_to_response=credits,videos&api_key=' + TMDB_KEY),
+    fetchImdbRating(stremioId.startsWith('tt') ? stremioId : null, type)
   ]);
   const it = (itRes?.ok) ? await itRes.json() : null;
   const en = (enRes?.ok) ? await enRes.json() : null;
@@ -792,7 +814,7 @@ async function buildMeta(type, stremioId) {
     background:  backdropUrl(backdropFallback),
     description: overview,
     genres:      (it?.genres || en?.genres || []).map(g => g.name),
-    imdbRating:  base.vote_average ? String(base.vote_average.toFixed(1)) : undefined,
+    imdbRating:  cinemetaRating || (base.vote_average ? String(base.vote_average.toFixed(1)) : undefined),
     year, cast, director, writer, runtime, trailerStreams, links,
     ...(videos.length ? { videos } : {})
   };
@@ -818,7 +840,7 @@ function metaFromTmdb(tmdb, obj, type) {
     background:  backdropUrl(tmdb?.backdrop_path),
     description,
     genres:      tmdb?.genres || [],
-    imdbRating:  tmdb?.vote_average ? String(tmdb.vote_average.toFixed(1)) : undefined,
+    imdbRating:  tmdb?.imdb_rating || (tmdb?.vote_average ? String(tmdb.vote_average.toFixed(1)) : undefined),
     year:        obj.year,
     ...(upcoming ? { upcoming: true, releaseDate } : {})
   };
