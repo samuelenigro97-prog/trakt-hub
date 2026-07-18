@@ -26,7 +26,7 @@ const META_CACHE_VERSION = 5; // incrementa quando cambia il formato del meta
 
 const manifest = {
   id: 'it.samuele.trakt.watchlist',
-  version: '1.9.2',
+  version: '1.9.3',
   name: 'Trakt Hub',
   description: 'La tua watchlist Trakt: Da vedere, Scegli per me, aggiungi e segna come visto direttamente da Stremio.',
   resources: ['catalog', 'stream'],
@@ -328,7 +328,7 @@ async function getTraktWatched(type) {
 // Gira opportunisticamente quando l'addon riceve richieste (throttle 30 min).
 const STREMIO_AUTHKEY = process.env.STREMIO_AUTHKEY || '';
 let lastWatchedSync = 0;
-const WATCHED_SYNC_INTERVAL = 30 * 60 * 1000;
+const WATCHED_SYNC_INTERVAL = 10 * 60 * 1000; // 10 min: visto altrove → Stremio allineato in fretta
 
 async function stremioLibraryMap() {
   const res = await fetch('https://api.strem.io/api/datastoreGet', {
@@ -382,18 +382,61 @@ function buildSeriesWatched(imdb, seasons, videos) {
   return { serialized: videoIds.length ? wbf.serialize() : '', matched, fully: totalEps > 0 && matched >= totalEps };
 }
 
-function syncLibItem(n, extra, itTitle, watchedStr, fully) {
+// Ultimo episodio visto su Trakt (per allineare il puntatore "continua a guardare")
+function lastWatchedEpisode(n) {
+  let best = null;
+  for (const se of (n.seasons || [])) {
+    if (!se.number) continue; // ignora gli speciali (stagione 0)
+    for (const ep of (se.episodes || [])) {
+      const t = ep.last_watched_at || '';
+      if (!best || t > best.t || (t === best.t && (se.number > best.season || (se.number === best.season && ep.number > best.episode)))) {
+        best = { season: se.number, episode: ep.number, t };
+      }
+    }
+  }
+  return best;
+}
+
+// Aggiorna (o crea) l'elemento di libreria SENZA azzerare lo stato di riproduzione
+// esistente: il puntatore season/episode avanza solo se Trakt è più avanti di Stremio.
+function syncLibItem(n, extra, itTitle, watchedStr, fully, cur) {
   const now = new Date().toISOString();
-  return {
+  const item = cur || {
     _id: n.id, name: itTitle || n.title, type: n.type,
     poster: extra.poster || '', posterShape: 'poster', background: extra.background || '',
-    year: n.year || '', removed: false, temp: false, _ctime: now, _mtime: now,
+    year: n.year || '', removed: false, temp: false, _ctime: now,
     state: {
-      lastWatched: n.watchedAt || now, timeWatched: 0, timeOffset: 0, overallTimeWatched: 0,
-      timesWatched: n.plays || 1, flaggedWatched: n.type === 'series' ? (fully ? 1 : 0) : 1,
-      duration: 0, video_id: '', watched: watchedStr || '', noNotif: false, season: 0, episode: 0
+      lastWatched: '', timeWatched: 0, timeOffset: 0, overallTimeWatched: 0,
+      timesWatched: 0, flaggedWatched: 0, duration: 0, video_id: '',
+      watched: '', noNotif: false, season: 0, episode: 0
     }
   };
+  if (!item.state) item.state = {};
+  if (!item.name && (itTitle || n.title)) item.name = itTitle || n.title;
+  if (!item.poster && extra.poster) item.poster = extra.poster;
+  if (!item.background && extra.background) item.background = extra.background;
+  item.removed = false;
+  item._mtime = now;
+
+  const st = item.state;
+  if (n.type === 'series') st.watched = watchedStr || st.watched || '';
+  st.flaggedWatched = n.type === 'series' ? (fully ? 1 : 0) : 1;
+  st.timesWatched = Math.max(st.timesWatched || 0, n.plays || 1);
+  if (n.watchedAt && (!st.lastWatched || n.watchedAt > st.lastWatched)) st.lastWatched = n.watchedAt;
+
+  if (n.type === 'series') {
+    const last = lastWatchedEpisode(n);
+    const ahead = last && (last.season > (st.season || 0) ||
+      (last.season === (st.season || 0) && last.episode > (st.episode || 0)));
+    if (ahead) {
+      st.season = last.season;
+      st.episode = last.episode;
+      st.video_id = n.id + ':' + last.season + ':' + last.episode;
+      st.timeOffset = 0; // episodio finito altrove: niente "riprendi da metà"
+      st.duration = 0;
+    }
+  }
+  return item;
 }
 
 // Set di imdb id attualmente in watchlist Trakt (movies + shows), lettura fresca senza ETag
@@ -440,11 +483,12 @@ async function syncWatchedToStremio() {
   const items = [];
   for (const n of todo) {
     const [extra, itTitle] = await Promise.all([syncMeta(n.type, n.id), syncItTitle(n.kind, n.id)]);
+    const cur = lib.get(n.id);
     if (n.type === 'series') {
       const bf = buildSeriesWatched(n.id, n.seasons, extra.videos || []);
-      items.push(syncLibItem(n, extra, itTitle, bf.serialized, bf.fully));
+      items.push(syncLibItem(n, extra, itTitle, bf.serialized, bf.fully, cur));
     } else {
-      items.push(syncLibItem(n, extra, itTitle, '', true));
+      items.push(syncLibItem(n, extra, itTitle, '', true, cur));
     }
   }
 
@@ -1184,6 +1228,10 @@ async function main() {
     await authenticateDeviceFlow();
   }
   scheduleProactiveRefresh();
+
+  // Sync visti su timer: non dipende più dalle richieste ai cataloghi, così un
+  // episodio visto su Nuvio/altro client arriva in Stremio entro ~10 minuti.
+  if (STREMIO_AUTHKEY) setInterval(maybeSyncWatched, 5 * 60 * 1000);
 
   // Warm-up: carica cataloghi e pre-fetcha tutti i meta in background
   setTimeout(async () => {
