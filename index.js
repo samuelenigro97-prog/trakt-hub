@@ -26,7 +26,7 @@ const META_CACHE_VERSION = 5; // incrementa quando cambia il formato del meta
 
 const manifest = {
   id: 'it.samuele.trakt.watchlist',
-  version: '1.9.3',
+  version: '1.9.4',
   name: 'Trakt Hub',
   description: 'La tua watchlist Trakt: Da vedere, Scegli per me, aggiungi e segna come visto direttamente da Stremio.',
   resources: ['catalog', 'stream'],
@@ -294,6 +294,16 @@ async function traktWrite(url, body) {
   return res;
 }
 
+// DELETE verso Trakt con retry su 401, come traktWrite (usato per pulire sync/playback)
+async function traktDelete(url) {
+  const build = () => ({ method: 'DELETE', headers: traktHeaders() });
+  let res = await fetch(url, build());
+  if (res.status === 401) {
+    if (await refreshTraktToken()) res = await fetch(url, build());
+  }
+  return res;
+}
+
 async function getTraktWatchlist(type) {
   const firstUrl = 'https://api.trakt.tv/users/' + TRAKT_USER + '/watchlist/' + type + '?limit=500&page=1&sort_by=listed_at&sort_how=desc';
   const first = await traktGet(firstUrl, 'watchlist-' + type);
@@ -328,7 +338,9 @@ async function getTraktWatched(type) {
 // Gira opportunisticamente quando l'addon riceve richieste (throttle 30 min).
 const STREMIO_AUTHKEY = process.env.STREMIO_AUTHKEY || '';
 let lastWatchedSync = 0;
-const WATCHED_SYNC_INTERVAL = 10 * 60 * 1000; // 10 min: visto altrove → Stremio allineato in fretta
+const WATCHED_SYNC_INTERVAL = 4 * 60 * 1000; // col timer da 5 min → un giro ogni ~5 minuti
+const PLAYBACK_WATCHED_PCT = 95;             // dal 95% in su una riproduzione conta come vista
+const PLAYBACK_MAX_AGE = 30 * 24 * 60 * 60 * 1000; // ignora posizioni più vecchie di 30 giorni
 
 async function stremioLibraryMap() {
   const res = await fetch('https://api.strem.io/api/datastoreGet', {
@@ -460,6 +472,97 @@ async function getWatchlistImdbSet() {
   return set;
 }
 
+// Posizioni "in corso" da Trakt (sync/playback):
+// - progresso >= PLAYBACK_WATCHED_PCT → promosso a visto nella history Trakt
+//   (così si allinea ovunque) e rimosso dalle riproduzioni in corso
+// - sotto soglia → portato in Stremio come "riprendi da qui", senza mai
+//   sovrascrivere una posizione più recente o un puntatore più avanti
+async function syncPlaybackToStremio(lib, byId, watchedMoviesNorm, watchedShowsNorm) {
+  const res = await traktGet('https://api.trakt.tv/sync/playback/?extended=full', 'playback');
+  if (res.notModified) return { updates: [], promoted: 0 };
+  const list = res.data || [];
+  const updates = [];
+  let promoted = 0;
+  const nowMs = Date.now();
+
+  for (const p of list) {
+    try {
+      const pausedAt = p.paused_at || '';
+      if (!pausedAt || nowMs - new Date(pausedAt).getTime() > PLAYBACK_MAX_AGE) continue;
+      const isEp = p.type === 'episode';
+      const media = isEp ? p.show : p.movie;
+      const imdb = media && media.ids && media.ids.imdb;
+      if (!imdb) continue;
+
+      if ((p.progress || 0) >= PLAYBACK_WATCHED_PCT) {
+        const already = isEp
+          ? watchedShowsNorm.some(n => n.id === imdb && (n.seasons || []).some(se =>
+              se.number === p.episode.season && (se.episodes || []).some(e => e.number === p.episode.number)))
+          : watchedMoviesNorm.some(n => n.id === imdb);
+        if (!already) {
+          const body = isEp
+            ? { episodes: [{ ids: p.episode.ids, watched_at: pausedAt }] }
+            : { movies: [{ ids: p.movie.ids, watched_at: pausedAt }] };
+          const r = await traktWrite('https://api.trakt.tv/sync/history', body);
+          if (r.ok) {
+            promoted++;
+            console.log('[sync-playback] promosso a visto (>=' + PLAYBACK_WATCHED_PCT + '%):',
+              imdb, isEp ? p.episode.season + 'x' + p.episode.number : '(film)');
+          }
+        }
+        if (p.id) await traktDelete('https://api.trakt.tv/sync/playback/' + p.id).catch(() => {});
+        continue;
+      }
+
+      const runtimeMin = isEp ? (p.episode && p.episode.runtime) : (p.movie && p.movie.runtime);
+      if (!runtimeMin) continue; // senza durata non possiamo calcolare la posizione
+      const durationMs = runtimeMin * 60000;
+      const offsetMs = Math.round(durationMs * (p.progress || 0) / 100);
+
+      const cur = byId.get(imdb) || lib.get(imdb);
+      const st = cur && cur.state;
+      if (st && st.lastWatched && pausedAt <= st.lastWatched) continue; // altrove è più recente
+      if (isEp && st && ((st.season || 0) > p.episode.season ||
+        ((st.season || 0) === p.episode.season && (st.episode || 0) > p.episode.number))) continue;
+
+      const type = isEp ? 'series' : 'movie';
+      let item = cur;
+      if (!item) {
+        const [extra, itTitle] = await Promise.all([syncMeta(type, imdb), syncItTitle(isEp ? 'shows' : 'movies', imdb)]);
+        const nowIso = new Date().toISOString();
+        item = {
+          _id: imdb, name: itTitle || media.title || '', type,
+          poster: extra.poster || '', posterShape: 'poster', background: extra.background || '',
+          year: media.year || '', removed: false, temp: false, _ctime: nowIso,
+          state: {
+            lastWatched: '', timeWatched: 0, timeOffset: 0, overallTimeWatched: 0,
+            timesWatched: 0, flaggedWatched: 0, duration: 0, video_id: '',
+            watched: '', noNotif: false, season: 0, episode: 0
+          }
+        };
+      }
+      const s2 = item.state;
+      s2.lastWatched = pausedAt;
+      s2.duration = durationMs;
+      s2.timeOffset = offsetMs;
+      if (isEp) {
+        s2.season = p.episode.season;
+        s2.episode = p.episode.number;
+        s2.video_id = imdb + ':' + p.episode.season + ':' + p.episode.number;
+      } else {
+        s2.video_id = imdb;
+      }
+      item.removed = false;
+      item._mtime = new Date().toISOString();
+      if (!byId.has(imdb)) updates.push(item);
+      byId.set(imdb, item);
+      console.log('[sync-playback] riprendi da ' + Math.round((p.progress || 0)) + '%:', imdb,
+        isEp ? p.episode.season + 'x' + p.episode.number : '(film)');
+    } catch (e) { console.warn('[sync-playback] elemento saltato:', e.message); }
+  }
+  return { updates, promoted };
+}
+
 async function syncWatchedToStremio() {
   if (!STREMIO_AUTHKEY) return;
   const norm = (w, type, o) => ({ id: o && o.ids && o.ids.imdb, title: o && o.title, year: o && o.year, plays: w.plays, watchedAt: w.last_watched_at, seasons: w.seasons, type, kind: type === 'movie' ? 'movies' : 'shows' });
@@ -492,6 +595,15 @@ async function syncWatchedToStremio() {
     }
   }
 
+  // Posizioni "in corso": promozione a visto >= 95% + resume dentro Stremio
+  let playbackPromoted = 0;
+  try {
+    const byId = new Map(items.map(i => [i._id, i]));
+    const pb = await syncPlaybackToStremio(lib, byId, movies, shows);
+    items.push(...pb.updates);
+    playbackPromoted = pb.promoted;
+  } catch (e) { console.warn('[sync-playback]', e.message); }
+
   // Un-mark self-healing: film in watchlist Trakt ma flaggati visti in Stremio → azzera pallino.
   // La watchlist ("da vedere") vince sulla contraddizione. Un visto reale va segnato su Trakt
   // (finisce in watched history → esce dalla watchlist → non viene azzerato).
@@ -512,7 +624,7 @@ async function syncWatchedToStremio() {
     }
   } catch (e) { console.warn('[sync-visti] un-mark fallito:', e.message); }
 
-  if (!items.length) { console.log('[sync-visti] già allineato'); return; }
+  if (!items.length) { console.log('[sync-visti] già allineato'); return playbackPromoted; }
   for (let i = 0; i < items.length; i += 100) {
     const res = await fetch('https://api.strem.io/api/datastorePut', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -522,6 +634,7 @@ async function syncWatchedToStremio() {
     if (j.error) throw new Error(JSON.stringify(j.error));
   }
   console.log('[sync-visti] ✅ aggiornati', items.length, 'titoli');
+  return playbackPromoted;
 }
 
 let syncInFlight = false;
@@ -530,7 +643,9 @@ function maybeSyncWatched() {
   if (Date.now() - lastWatchedSync < WATCHED_SYNC_INTERVAL) return;
   syncInFlight = true;
   syncWatchedToStremio()
-    .then(() => { lastWatchedSync = Date.now(); }) // throttle solo su successo → i fallimenti riprovano
+    // throttle solo su successo → i fallimenti riprovano; se abbiamo promosso
+    // qualcosa a visto, il prossimo tick risincronizza subito la history
+    .then(promoted => { lastWatchedSync = promoted ? 0 : Date.now(); })
     .catch(e => console.warn('[sync-visti]', e.message))
     .finally(() => { syncInFlight = false; });
 }
@@ -1229,8 +1344,9 @@ async function main() {
   }
   scheduleProactiveRefresh();
 
-  // Sync visti su timer: non dipende più dalle richieste ai cataloghi, così un
-  // episodio visto su Nuvio/altro client arriva in Stremio entro ~10 minuti.
+  // Sync visti + posizioni su timer: non dipende più dalle richieste ai
+  // cataloghi, così una visione su Nuvio/altro client arriva in Stremio
+  // entro ~5 minuti.
   if (STREMIO_AUTHKEY) setInterval(maybeSyncWatched, 5 * 60 * 1000);
 
   // Warm-up: carica cataloghi e pre-fetcha tutti i meta in background
