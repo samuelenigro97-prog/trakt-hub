@@ -26,7 +26,7 @@ const META_CACHE_VERSION = 5; // incrementa quando cambia il formato del meta
 
 const manifest = {
   id: 'it.samuele.trakt.watchlist',
-  version: '1.9.4',
+  version: '1.9.5',
   name: 'Trakt Hub',
   description: 'La tua watchlist Trakt: Da vedere, Scegli per me, aggiungi e segna come visto direttamente da Stremio.',
   resources: ['catalog', 'stream'],
@@ -579,7 +579,12 @@ async function syncWatchedToStremio() {
     if (n.type === 'movie') return !(cur && cur.state && cur.state.flaggedWatched === 1);
     // serie: nuova, oppure numero episodi visti cambiato rispetto al bitfield salvato
     const stored = cur && cur.state ? watchedPopcount(cur.state.watched) : 0;
-    return !cur || stored !== traktEpCount(n);
+    if (!cur || stored !== traktEpCount(n)) return true;
+    // ...oppure puntatore "continua a guardare" rimasto indietro rispetto a Trakt
+    const last = lastWatchedEpisode(n);
+    const st = cur.state || {};
+    return !!(last && (last.season > (st.season || 0) ||
+      (last.season === (st.season || 0) && last.episode > (st.episode || 0))));
   });
   if (todo.length) console.log('[sync-visti] da aggiornare:', todo.length);
 
