@@ -629,7 +629,7 @@ async function syncWatchedToStremio() {
     }
   } catch (e) { console.warn('[sync-visti] un-mark fallito:', e.message); }
 
-  if (!items.length) { console.log('[sync-visti] già allineato'); return playbackPromoted; }
+  if (!items.length) { console.log('[sync-visti] già allineato'); syncStatus.lastUpdated = 0; return playbackPromoted; }
   for (let i = 0; i < items.length; i += 100) {
     const res = await fetch('https://api.strem.io/api/datastorePut', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -639,19 +639,31 @@ async function syncWatchedToStremio() {
     if (j.error) throw new Error(JSON.stringify(j.error));
   }
   console.log('[sync-visti] ✅ aggiornati', items.length, 'titoli');
+  syncStatus.lastUpdated = items.length;
   return playbackPromoted;
 }
 
 let syncInFlight = false;
+// Diagnostica esposta su /sync-status (nessun dato sensibile)
+const syncStatus = { lastAttemptAt: null, lastSuccessAt: null, lastError: null, lastUpdated: 0 };
+
 function maybeSyncWatched() {
   if (!STREMIO_AUTHKEY || syncInFlight) return;
   if (Date.now() - lastWatchedSync < WATCHED_SYNC_INTERVAL) return;
   syncInFlight = true;
+  syncStatus.lastAttemptAt = new Date().toISOString();
   syncWatchedToStremio()
     // throttle solo su successo → i fallimenti riprovano; se abbiamo promosso
     // qualcosa a visto, il prossimo tick risincronizza subito la history
-    .then(promoted => { lastWatchedSync = promoted ? 0 : Date.now(); })
-    .catch(e => console.warn('[sync-visti]', e.message))
+    .then(promoted => {
+      lastWatchedSync = promoted ? 0 : Date.now();
+      syncStatus.lastSuccessAt = new Date().toISOString();
+      syncStatus.lastError = null;
+    })
+    .catch(e => {
+      console.warn('[sync-visti]', e.message);
+      syncStatus.lastError = e.message;
+    })
     .finally(() => { syncInFlight = false; });
 }
 
@@ -1423,6 +1435,33 @@ async function main() {
 
   const app = express();
   app.get('/logo.png', (req, res) => res.sendFile(path.join(__dirname, 'logo.png')));
+
+  // Diagnostica sync (stato generale; con ?id=ttXXXX mostra lo stato di un titolo in libreria Stremio)
+  app.get('/sync-status', async (req, res) => {
+    const out = {
+      version: manifest.version,
+      stremioAuthkeyConfigurata: !!STREMIO_AUTHKEY,
+      timerAttivo: !!STREMIO_AUTHKEY,
+      ultimoTentativo: syncStatus.lastAttemptAt,
+      ultimoSuccesso: syncStatus.lastSuccessAt,
+      ultimoErrore: syncStatus.lastError,
+      titoliAggiornatiUltimoGiro: syncStatus.lastUpdated
+    };
+    const id = (req.query.id || '').trim();
+    if (id && STREMIO_AUTHKEY && /^tt\d+$/.test(id)) {
+      try {
+        const lib = await stremioLibraryMap();
+        const it = lib.get(id);
+        out.titolo = !it ? { inLibreria: false } : {
+          inLibreria: true, nome: it.name,
+          stagione: it.state?.season, episodio: it.state?.episode,
+          videoId: it.state?.video_id, episodiVisti: watchedPopcount(it.state?.watched),
+          lastWatched: it.state?.lastWatched, timeOffset: it.state?.timeOffset
+        };
+      } catch (e) { out.titolo = { errore: e.message }; }
+    }
+    res.json(out);
+  });
   app.get('/setup', (req, res) => res.sendFile(path.join(__dirname, 'setup.html')));
 
   const traktAction = async (action, traktType, stremioId) => {
