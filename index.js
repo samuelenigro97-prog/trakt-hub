@@ -3,11 +3,13 @@ const express = require('express');
 const fs = require('fs');
 const path = require('path');
 const zlib = require('zlib');
+const crypto = require('crypto');
 const WatchedBitField = require('stremio-watched-bitfield');
 
 const TRAKT_CLIENT_ID = process.env.TRAKT_CLIENT_ID;
 const TRAKT_CLIENT_SECRET = process.env.TRAKT_CLIENT_SECRET;
-const TRAKT_USER = process.env.TRAKT_USER || 'SamueleNigro';
+// 'me' = utente proprietario del token OAuth (nessun handle personale hardcoded)
+const TRAKT_USER = process.env.TRAKT_USER || 'me';
 const TMDB_KEY = process.env.TMDB_KEY || '';
 if (!TRAKT_CLIENT_ID || !TRAKT_CLIENT_SECRET) {
   throw new Error('Config mancante: imposta TRAKT_CLIENT_ID e TRAKT_CLIENT_SECRET nelle env var.');
@@ -15,8 +17,52 @@ if (!TRAKT_CLIENT_ID || !TRAKT_CLIENT_SECRET) {
 const TOKEN_FILE = path.join(__dirname, 'trakt_token.json');
 const CACHE_FILE = path.join(__dirname, 'cache_data.json');
 const PORT = parseInt(process.env.PORT || '7779');
-const ADDON_URL = (process.env.ADDON_URL || 'http://192.168.178.188:7779').replace(/\/$/, '');
+// Nessun IP di LAN come default: fallback neutro a localhost per lo sviluppo.
+const ADDON_URL = (process.env.ADDON_URL || ('http://localhost:' + PORT)).replace(/\/$/, '');
 const CLEAR_CACHE_TOKEN = process.env.CLEAR_CACHE_TOKEN || '';
+// Chiave per cifrare i token a riposo (AES-256-GCM). Se assente → fallback in chiaro.
+const TOKEN_ENC_KEY = process.env.TOKEN_ENC_KEY || '';
+
+// ─── Persistenza sicura: cifratura token + scritture atomiche ─────────────────
+const ENC_PREFIX = 'enc:v1:';
+function encKeyBytes() { return crypto.createHash('sha256').update(TOKEN_ENC_KEY).digest(); }
+
+// Serializza un oggetto token: cifrato se TOKEN_ENC_KEY è impostata, altrimenti JSON in chiaro.
+function serializeToken(obj) {
+  const json = JSON.stringify(obj, null, 2);
+  if (!TOKEN_ENC_KEY) return json;
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv('aes-256-gcm', encKeyBytes(), iv);
+  const ct = Buffer.concat([cipher.update(json, 'utf8'), cipher.final()]);
+  const tag = cipher.getAuthTag();
+  return ENC_PREFIX + Buffer.concat([iv, tag, ct]).toString('base64');
+}
+
+// Legge il contenuto salvato: decifra se necessario. Ritorna null se non decifrabile.
+function deserializeToken(raw) {
+  if (typeof raw !== 'string') return null;
+  const s = raw.trim();
+  if (!s.startsWith(ENC_PREFIX)) return JSON.parse(s); // formato in chiaro (retrocompatibile)
+  if (!TOKEN_ENC_KEY) { console.warn('[token] dato cifrato ma TOKEN_ENC_KEY assente'); return null; }
+  const buf = Buffer.from(s.slice(ENC_PREFIX.length), 'base64');
+  const iv = buf.subarray(0, 12), tag = buf.subarray(12, 28), ct = buf.subarray(28);
+  const decipher = crypto.createDecipheriv('aes-256-gcm', encKeyBytes(), iv);
+  decipher.setAuthTag(tag);
+  return JSON.parse(Buffer.concat([decipher.update(ct), decipher.final()]).toString('utf8'));
+}
+
+// Scrittura atomica: file temporaneo + rename (evita file corrotti su crash a metà).
+function writeFileAtomicSync(file, data, opts) {
+  const tmp = file + '.tmp-' + process.pid;
+  fs.writeFileSync(tmp, data, opts);
+  fs.renameSync(tmp, file);
+}
+function saveTokenToDisk(tokenData) {
+  try {
+    writeFileAtomicSync(TOKEN_FILE, serializeToken(tokenData), { mode: 0o600 });
+    try { fs.chmodSync(TOKEN_FILE, 0o600); } catch (e) {}
+  } catch (e) { console.warn('[token] salvataggio fallito:', e.message); }
+}
 const GIST_TOKEN = process.env.GITHUB_GIST_TOKEN || ''; // PAT GitHub con scope gist
 const GIST_ID = process.env.GITHUB_GIST_ID || '';       // id della gist segreta che tiene il token
 const GIST_FILENAME = 'trakt_token.json';
@@ -26,7 +72,7 @@ const META_CACHE_VERSION = 5; // incrementa quando cambia il formato del meta
 
 const manifest = {
   id: 'it.samuele.trakt.watchlist',
-  version: '1.9.5',
+  version: '1.9.6',
   name: 'Trakt Hub',
   description: 'La tua watchlist Trakt: Da vedere, Scegli per me, aggiungi e segna come visto direttamente da Stremio.',
   resources: ['catalog', 'stream'],
@@ -74,8 +120,12 @@ function clearCache() {
 
 function saveCacheToDisk() {
   const data = JSON.stringify({ catalog: cache, meta: metaCache });
-  fs.writeFile(CACHE_FILE, data, e => {
-    if (e) console.warn('[cache-disk] Errore salvataggio:', e.message);
+  const tmp = CACHE_FILE + '.tmp-' + process.pid;
+  fs.writeFile(tmp, data, e => {
+    if (e) { console.warn('[cache-disk] Errore salvataggio:', e.message); return; }
+    fs.rename(tmp, CACHE_FILE, e2 => {
+      if (e2) console.warn('[cache-disk] Errore rename:', e2.message);
+    });
   });
 }
 
@@ -110,7 +160,7 @@ async function gistLoad() {
     if (!r.ok) { console.warn('[gist] load HTTP ' + r.status); return null; }
     const j = await r.json();
     const content = j.files && j.files[GIST_FILENAME] && j.files[GIST_FILENAME].content;
-    return content ? JSON.parse(content) : null;
+    return content ? deserializeToken(content) : null;
   } catch (e) { console.warn('[gist] load errore:', e.message); return null; }
 }
 
@@ -120,7 +170,7 @@ async function gistSave(tokenData) {
     const r = await fetch('https://api.github.com/gists/' + GIST_ID, {
       method: 'PATCH',
       headers: { Authorization: 'Bearer ' + GIST_TOKEN, 'User-Agent': GIST_UA, Accept: 'application/vnd.github+json', 'Content-Type': 'application/json' },
-      body: JSON.stringify({ files: { [GIST_FILENAME]: { content: JSON.stringify(tokenData, null, 2) } } })
+      body: JSON.stringify({ files: { [GIST_FILENAME]: { content: serializeToken(tokenData) } } })
     });
     if (!r.ok) console.warn('[gist] save HTTP ' + r.status);
   } catch (e) { console.warn('[gist] save errore:', e.message); }
@@ -138,14 +188,14 @@ function applyToken(data, src) {
 async function loadToken() {
   try {
     if (fs.existsSync(TOKEN_FILE)) {
-      const data = JSON.parse(fs.readFileSync(TOKEN_FILE, 'utf8'));
-      if (data.access_token) { applyToken(data, 'file'); return true; }
+      const data = deserializeToken(fs.readFileSync(TOKEN_FILE, 'utf8'));
+      if (data && data.access_token) { applyToken(data, 'file'); return true; }
     }
   } catch (e) {}
   const g = await gistLoad();
   if (g && g.access_token) {
     applyToken(g, 'gist');
-    try { fs.writeFileSync(TOKEN_FILE, JSON.stringify(g, null, 2)); } catch (e) {}
+    saveTokenToDisk(g); // materializza in locale (cifrato se configurato)
     return true;
   }
   if (process.env.TRAKT_ACCESS_TOKEN) {
@@ -159,7 +209,7 @@ async function loadToken() {
 }
 
 function saveToken(tokenData) {
-  try { fs.writeFileSync(TOKEN_FILE, JSON.stringify(tokenData, null, 2)); } catch (e) {}
+  saveTokenToDisk(tokenData);
   accessToken = tokenData.access_token;
   refreshToken = tokenData.refresh_token || refreshToken;
   if (tokenData.created_at && tokenData.expires_in) tokenExpiresAt = (tokenData.created_at + tokenData.expires_in) * 1000;
@@ -1487,68 +1537,91 @@ h1{color:${color};margin-bottom:.5rem}p{color:#aaa;margin-top:.5rem}
 a{color:${color};text-decoration:none;font-size:.9rem}</style></head>
 <body><div class="box"><h1>${title}</h1><p>${message}</p></div></body></html>`;
 
-  app.get('/trakt/add/:type/:id', async (req, res) => {
-    try {
-      const { ok, status } = await traktAction('add', req.params.type, req.params.id);
-      if (ok) {
-        const cId = 'trakt-' + (req.params.type === 'movies' ? 'movies' : 'series');
-        const mType = req.params.type === 'movies' ? 'movie' : 'series';
-        delete cache[cId];
-        setImmediate(() => getCatalogCached(cId, mType).catch(() => {}));
-        console.log('[watchlist] Aggiunto:', req.params.id);
-        res.send(htmlPage('✅ Aggiunto!', 'Il titolo è stato aggiunto alla tua Watchlist Trakt.<br>Chiudi questa pagina e aggiorna Stremio.', '#4ade80'));
-      } else {
-        res.status(500).send(htmlPage('❌ Errore', 'Trakt ha risposto ' + status + '. Riprova.', '#f87171'));
-      }
-    } catch (e) {
-      res.status(500).send(htmlPage('❌ Errore', e.message, '#f87171'));
-    }
+  // ─── Protezione degli endpoint che SCRIVONO su Trakt ────────────────────────
+  // Questi link sono azioni con effetti collaterali. Per impedire che bot,
+  // prefetcher e scanner di *.onrender.com modifichino la watchlist:
+  //  1) il GET NON esegue nulla: serve solo una pagina di conferma che invia
+  //     una POST via JavaScript (i bot non eseguono JS → nessun effetto);
+  //  2) la POST richiede l'header X-Confirm e un User-Agent da browser;
+  //  3) rate limit per IP.
+  const rlHits = new Map();
+  const RL_WINDOW = 60 * 1000, RL_MAX = 12;
+  const clientIp = req => String(req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').split(',')[0].trim();
+  const rateLimited = req => {
+    const ip = clientIp(req), now = Date.now();
+    const arr = (rlHits.get(ip) || []).filter(t => now - t < RL_WINDOW);
+    arr.push(now); rlHits.set(ip, arr);
+    return arr.length > RL_MAX;
+  };
+  const looksLikeBot = req => {
+    const ua = String(req.headers['user-agent'] || '').toLowerCase();
+    if (!ua) return true;
+    return /bot|crawl|spider|slurp|prerender|preview|scan|curl|wget|python-requests|go-http|headless|facebookexternalhit|whatsapp|telegram/.test(ua);
+  };
+
+  const confirmPage = `<!DOCTYPE html>
+<html lang="it"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Attendere…</title>
+<style>body{font-family:system-ui,sans-serif;background:#1a1a2e;color:#eee;display:flex;align-items:center;justify-content:center;height:100vh;margin:0}
+.box{text-align:center;padding:2rem;background:#16213e;border-radius:1rem;border:2px solid #6366f1;max-width:400px}
+h1{color:#6366f1}p{color:#aaa}</style></head>
+<body><div class="box"><h1>⏳ Un attimo…</h1><p>Aggiorno Trakt.</p></div>
+<script>
+fetch(location.pathname,{method:'POST',headers:{'X-Confirm':'1'}})
+ .then(function(r){return r.text()})
+ .then(function(h){document.open();document.write(h);document.close()})
+ .catch(function(){document.body.innerHTML='<div class=box><h1>❌ Errore</h1><p>Riprova.</p></div>'});
+</script></body></html>`;
+
+  // Registra un'azione: GET = pagina di conferma, POST = esecuzione protetta.
+  const mutationRoute = (routePath, run) => {
+    app.get(routePath, (req, res) => res.type('html').send(confirmPage));
+    app.post(routePath, async (req, res) => {
+      if (looksLikeBot(req) || req.get('X-Confirm') !== '1') return res.status(403).send('forbidden');
+      if (rateLimited(req)) return res.status(429).send('too many requests');
+      try { res.type('html').send(await run(req.params)); }
+      catch (e) { res.status(500).send(htmlPage('❌ Errore', e.message, '#f87171')); }
+    });
+  };
+
+  mutationRoute('/trakt/add/:type/:id', async ({ type, id }) => {
+    const { ok, status } = await traktAction('add', type, id);
+    if (!ok) return htmlPage('❌ Errore', 'Trakt ha risposto ' + status + '. Riprova.', '#f87171');
+    const cId = 'trakt-' + (type === 'movies' ? 'movies' : 'series');
+    delete cache[cId];
+    setImmediate(() => getCatalogCached(cId, type === 'movies' ? 'movie' : 'series').catch(() => {}));
+    console.log('[watchlist] Aggiunto:', id);
+    return htmlPage('✅ Aggiunto!', 'Il titolo è stato aggiunto alla tua Watchlist Trakt.<br>Chiudi questa pagina e aggiorna Stremio.', '#4ade80');
   });
 
-  app.get('/trakt/remove/:type/:id', async (req, res) => {
-    try {
-      const { ok, status } = await traktAction('remove', req.params.type, req.params.id);
-      if (ok) {
-        const cId = 'trakt-' + (req.params.type === 'movies' ? 'movies' : 'series');
-        const metaType = req.params.type === 'movies' ? 'movie' : 'series';
-        delete cache[cId];
-        delete metaCache[metaType + ':' + req.params.id];
-        setImmediate(() => getCatalogCached(cId, metaType).catch(() => {}));
-        console.log('[watchlist] Rimosso:', req.params.id);
-        res.send(htmlPage('🗑️ Rimosso!', 'Il titolo è stato rimosso dalla tua Watchlist Trakt.<br>Chiudi questa pagina e aggiorna Stremio.', '#fb923c'));
-      } else {
-        res.status(500).send(htmlPage('❌ Errore', 'Trakt ha risposto ' + status + '. Riprova.', '#f87171'));
-      }
-    } catch (e) {
-      res.status(500).send(htmlPage('❌ Errore', e.message, '#f87171'));
-    }
+  mutationRoute('/trakt/remove/:type/:id', async ({ type, id }) => {
+    const { ok, status } = await traktAction('remove', type, id);
+    if (!ok) return htmlPage('❌ Errore', 'Trakt ha risposto ' + status + '. Riprova.', '#f87171');
+    const cId = 'trakt-' + (type === 'movies' ? 'movies' : 'series');
+    const metaType = type === 'movies' ? 'movie' : 'series';
+    delete cache[cId];
+    delete metaCache[metaType + ':' + id];
+    setImmediate(() => getCatalogCached(cId, metaType).catch(() => {}));
+    console.log('[watchlist] Rimosso:', id);
+    return htmlPage('🗑️ Rimosso!', 'Il titolo è stato rimosso dalla tua Watchlist Trakt.<br>Chiudi questa pagina e aggiorna Stremio.', '#fb923c');
   });
 
-  app.get('/trakt/watched/:type/:id', async (req, res) => {
-    try {
-      const { type, id } = req.params;
-      const imdbId = id.startsWith('tt') ? id : null;
-      const tmdbId = id.startsWith('tmdb:') ? id.replace('tmdb:', '') : null;
-      const ids = imdbId ? { imdb: imdbId } : { tmdb: parseInt(tmdbId) };
-      const body = type === 'movies'
-        ? { movies: [{ ids, watched_at: new Date().toISOString() }] }
-        : { shows: [{ ids, watched_at: new Date().toISOString() }] };
-      const r = await traktWrite('https://api.trakt.tv/sync/history', body);
-      if (r.ok) {
-        // Invalida catalogo e meta così sparisce dal Da vedere
-        const catalogId = 'trakt-' + (type === 'movies' ? 'movies' : 'series');
-        const metaType = type === 'movies' ? 'movie' : 'series';
-        delete cache[catalogId];
-        delete metaCache[metaType + ':' + id];
-        setImmediate(() => getCatalogCached(catalogId, metaType).catch(() => {}));
-        console.log('[watched] Segnato come visto:', id);
-        res.send(htmlPage('✅ Segnato come visto!', 'Trakt è stato aggiornato.<br>Chiudi questa pagina e aggiorna Stremio per vederlo scomparire dal catalogo.', '#4ade80'));
-      } else {
-        res.status(500).send(htmlPage('❌ Errore', 'Non è stato possibile aggiornare Trakt. Riprova.', '#f87171'));
-      }
-    } catch (e) {
-      res.status(500).send(htmlPage('❌ Errore', e.message, '#f87171'));
-    }
+  mutationRoute('/trakt/watched/:type/:id', async ({ type, id }) => {
+    const imdbId = id.startsWith('tt') ? id : null;
+    const tmdbId = id.startsWith('tmdb:') ? id.replace('tmdb:', '') : null;
+    const ids = imdbId ? { imdb: imdbId } : { tmdb: parseInt(tmdbId) };
+    const body = type === 'movies'
+      ? { movies: [{ ids, watched_at: new Date().toISOString() }] }
+      : { shows: [{ ids, watched_at: new Date().toISOString() }] };
+    const r = await traktWrite('https://api.trakt.tv/sync/history', body);
+    if (!r.ok) return htmlPage('❌ Errore', 'Non è stato possibile aggiornare Trakt. Riprova.', '#f87171');
+    const catalogId = 'trakt-' + (type === 'movies' ? 'movies' : 'series');
+    const metaType = type === 'movies' ? 'movie' : 'series';
+    delete cache[catalogId];
+    delete metaCache[metaType + ':' + id];
+    setImmediate(() => getCatalogCached(catalogId, metaType).catch(() => {}));
+    console.log('[watched] Segnato come visto:', id);
+    return htmlPage('✅ Segnato come visto!', 'Trakt è stato aggiornato.<br>Chiudi questa pagina e aggiorna Stremio per vederlo scomparire dal catalogo.', '#4ade80');
   });
 
   app.get('/refresh/:token', async (req, res) => {
@@ -1608,7 +1681,13 @@ a{color:${color};text-decoration:none;font-size:.9rem}</style></head>
   });
 }
 
-main().catch(err => {
-  console.error('Errore fatale:', err.message);
-  process.exit(1);
-});
+// Avvia il server solo se eseguito direttamente (non quando importato dai test).
+if (require.main === module) {
+  main().catch(err => {
+    console.error('Errore fatale:', err.message);
+    process.exit(1);
+  });
+}
+
+// Esposto per i test (le funzioni di sicurezza sono pure e non toccano lo stato del server).
+module.exports = { serializeToken, deserializeToken, writeFileAtomicSync, ENC_PREFIX };
